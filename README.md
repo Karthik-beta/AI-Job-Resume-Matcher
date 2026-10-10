@@ -30,6 +30,8 @@ bun run dev
 
 Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of `openssl rand -base64 32`.
 
+Runs are processed by a separate worker, which needs `FIRECRAWL_API_KEY` and `OPENROUTER_API_KEY`. Without them the API still starts, but the worker exits.
+
 When `.env.example` gains a new variable, copy it into your `.env`. The API refuses to start if a required variable is missing.
 
 If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE_URL`.
@@ -38,7 +40,7 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 
 | Script | Description |
 | --- | --- |
-| `bun run dev` | Start Postgres and Redis, then both apps |
+| `bun run dev` | Start Postgres and Redis, then the web app, API and run worker |
 | `bun run db:migrate` | Create and apply Prisma migrations |
 | `bun run lint` | Lint and format check with Biome |
 | `bun run typecheck` | Type-check every app |
