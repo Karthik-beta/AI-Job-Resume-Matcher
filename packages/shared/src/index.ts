@@ -16,6 +16,11 @@ const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 export const CreateJobSource = Schema.Struct({ url: HttpUrl });
 export type CreateJobSource = typeof CreateJobSource.Type;
 
+export const StartRun = Schema.Struct({
+  sourceIds: Schema.NonEmptyArray(Schema.NonEmptyString),
+});
+export type StartRun = typeof StartRun.Type;
+
 export const UpdateSettings = Schema.Struct({
   resumeUrl: Schema.NullOr(HttpUrl),
   discordWebhookUrl: Schema.NullOr(HttpUrl),
