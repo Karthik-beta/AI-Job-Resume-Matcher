@@ -1,7 +1,7 @@
 "use client";
 
 import { CreateJobSource } from "@job-matcher/shared";
-import { type FormEvent, useEffect, useState } from "react";
+import { type SubmitEvent, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,7 @@ export function JobSources() {
       .catch(() => setError("Could not load job sources."));
   }, []);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const { value, errors } = validate(CreateJobSource, { url });
     if (!value) {
