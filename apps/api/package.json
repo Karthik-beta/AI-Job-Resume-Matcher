@@ -5,16 +5,24 @@
   "scripts": {
     "dev": "bun --env-file=../../.env --watch src/main.ts",
     "start": "bun --env-file=../../.env src/main.ts",
+    "test": "bun --env-file=../../.env test",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@job-matcher/shared": "workspace:*",
     "@nestjs/common": "^12.1.2",
     "@nestjs/core": "^12.1.2",
     "@nestjs/platform-express": "^12.1.2",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
+    "@thallesp/nestjs-better-auth": "^2.8.0",
+    "better-auth": "^1.7.7",
     "effect": "^4.0.2",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.1"
   }
 }
