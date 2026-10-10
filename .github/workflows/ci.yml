@@ -19,11 +19,19 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d job_matcher"
           --health-interval 2s --health-timeout 5s --health-retries 15
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 5s --health-retries 15
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_matcher
       BETTER_AUTH_SECRET: ci-only-secret-not-used-in-production
       BETTER_AUTH_URL: http://localhost:3000
       API_PORT: 4000
+      REDIS_URL: redis://localhost:6379
+      OPENROUTER_MODEL: nvidia/nemotron-3-super-120b-a12b:free
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
