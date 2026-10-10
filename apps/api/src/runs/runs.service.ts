@@ -9,6 +9,7 @@ import type { Queue } from "bullmq";
 import { config } from "../config";
 import { contextKey } from "../matching/context-key";
 import { PrismaService } from "../prisma/prisma.service";
+import { requirementsOf } from "./run-settings";
 import { type RunJob, runsQueue } from "./runs.queue";
 
 @Injectable()
@@ -46,21 +47,14 @@ export class RunsService {
             resumeUrl: settings.resumeUrl,
             sourceIds: ids,
             model: config.OPENROUTER_MODEL,
-            requirements: {
-              experienceYears: settings.experienceYears,
-              experienceMonths: settings.experienceMonths,
-              jobMinYears: settings.targetMinYears,
-              jobMaxYears: settings.targetMaxYears,
-              locations: settings.locations,
-              includeUnknown: settings.includeUnknown,
-            },
+            requirements: requirementsOf(settings),
           }),
         },
       });
     });
 
     try {
-      await this.queue.add("run", { runId: run.id }, { jobId: run.id });
+      await this.queue.add("run", { runId: run.id }, { jobId: run.id, attempts: 1 });
     } catch {
       // Without this the QUEUED row would block every later start with a 409.
       await this.prisma.run.update({
