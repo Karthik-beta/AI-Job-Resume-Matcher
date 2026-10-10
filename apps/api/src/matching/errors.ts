@@ -10,6 +10,11 @@ export class OpenRouterUnavailable extends Data.TaggedError("OpenRouterUnavailab
   readonly message: string;
 }> {}
 
+export class OpenRouterRequestFailed extends Data.TaggedError("OpenRouterRequestFailed")<{
+  readonly status: number;
+  readonly message: string;
+}> {}
+
 export class ManagementKeyError extends Data.TaggedError("ManagementKeyError")<{
   readonly message: string;
 }> {}
@@ -44,6 +49,7 @@ export class NotifyFailed extends Data.TaggedError("NotifyFailed")<{
 export type MatchingError =
   | OpenRouterAuthError
   | OpenRouterUnavailable
+  | OpenRouterRequestFailed
   | ManagementKeyError
   | ModelUnsupported
   | FirecrawlBlocked
@@ -60,6 +66,7 @@ export const stopsRun = (error: MatchingError): boolean => {
     case "ModelUnsupported":
     case "FirecrawlBlocked":
       return true;
+    case "OpenRouterRequestFailed":
     case "ScrapeFailed":
     case "MatchOutputInvalid":
     case "SaveFailed":
@@ -71,17 +78,16 @@ export const stopsRun = (error: MatchingError): boolean => {
 const openRouterUnavailableStatuses: ReadonlySet<number> = new Set([402, 403, 404, 429]);
 const firecrawlBlockedStatuses: ReadonlySet<number> = new Set([401, 402, 429]);
 
-// Other OpenRouter statuses (e.g. 5xx) only fail the current job, as in the Python app,
-// so they are not mapped to a run-stopping error.
+// Other OpenRouter statuses (e.g. 5xx) only fail the current job, as in the Python app.
 export const openRouterErrorFromStatus = (
   status: number,
   message: string,
-): OpenRouterAuthError | OpenRouterUnavailable | null => {
+): OpenRouterAuthError | OpenRouterUnavailable | OpenRouterRequestFailed => {
   if (status === 401) return new OpenRouterAuthError({ status, message });
   if (openRouterUnavailableStatuses.has(status)) {
     return new OpenRouterUnavailable({ status, message });
   }
-  return null;
+  return new OpenRouterRequestFailed({ status, message });
 };
 
 export const firecrawlErrorFromStatus = (

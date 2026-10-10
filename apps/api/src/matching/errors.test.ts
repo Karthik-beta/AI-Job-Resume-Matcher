@@ -8,6 +8,7 @@ import {
   ModelUnsupported,
   NotifyFailed,
   OpenRouterAuthError,
+  OpenRouterRequestFailed,
   OpenRouterUnavailable,
   openRouterErrorFromStatus,
   SaveFailed,
@@ -27,6 +28,7 @@ describe("stopsRun", () => {
   });
 
   test.each<MatchingError>([
+    new OpenRouterRequestFailed({ status: 502, message: "bad gateway" }),
     new ScrapeFailed({ status: 500, message: "server error" }),
     new MatchOutputInvalid({ message: "empty" }),
     new SaveFailed({ message: "db down" }),
@@ -38,17 +40,19 @@ describe("stopsRun", () => {
 
 describe("openRouterErrorFromStatus", () => {
   test("maps 401 to an auth error", () => {
-    expect(openRouterErrorFromStatus(401, "nope")?._tag).toBe("OpenRouterAuthError");
+    expect(openRouterErrorFromStatus(401, "nope")._tag).toBe("OpenRouterAuthError");
   });
 
   test.each([402, 403, 404, 429])("maps %p to unavailable", (status) => {
     const error = openRouterErrorFromStatus(status, "nope");
-    expect(error?._tag).toBe("OpenRouterUnavailable");
-    expect(error?.status).toBe(status);
+    expect(error._tag).toBe("OpenRouterUnavailable");
+    expect(error.status).toBe(status);
   });
 
-  test.each([400, 500, 503])("leaves %p unmapped", (status) => {
-    expect(openRouterErrorFromStatus(status, "nope")).toBeNull();
+  test.each([400, 500, 503])("maps %p to a failed request that continues the run", (status) => {
+    const error = openRouterErrorFromStatus(status, "nope");
+    expect(error._tag).toBe("OpenRouterRequestFailed");
+    expect(stopsRun(error)).toBe(false);
   });
 });
 
