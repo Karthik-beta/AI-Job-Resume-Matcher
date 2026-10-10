@@ -1,0 +1,122 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../apps/api/src/generated/prisma"
+  runtime      = "bun"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Settings {
+  userId            String   @id
+  resumeUrl         String?
+  discordWebhookUrl String?
+  experienceYears   Int      @default(0)
+  experienceMonths  Int      @default(0) // 0-11
+  targetMinYears    Float?
+  targetMaxYears    Float?
+  locations         String[]
+  includeUnknown    Boolean  @default(true)
+  maxJobsPerRun     Int      @default(5) // 1-20
+  scheduleMinutes   Int? // null = no scheduled checks
+}
+
+model JobSource {
+  id            String    @id @default(uuid(7))
+  userId        String
+  url           String
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@unique([userId, url])
+}
+
+enum RunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  STOPPED
+  FAILED
+}
+
+enum RunTrigger {
+  MANUAL
+  SCHEDULED
+}
+
+model Run {
+  id         String      @id @default(uuid(7))
+  userId     String
+  trigger    RunTrigger
+  status     RunStatus   @default(QUEUED)
+  contextKey String // hash of resume URL + source ids + model + requirements
+  sourceIds  String[]
+  found      Int         @default(0)
+  eligible   Int         @default(0)
+  checked    Int         @default(0)
+  failed     Int         @default(0)
+  stopReason String?
+  createdAt  DateTime    @default(now())
+  finishedAt DateTime?
+  results    JobResult[]
+
+  @@index([userId, createdAt])
+}
+
+model JobResult {
+  id         String   @id @default(uuid(7))
+  runId      String
+  run        Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  userId     String
+  contextKey String
+  jobUrl     String
+  title      String
+  company    String
+  isMatch    Boolean? // null when the job errored
+  reason     String?
+  error      String?
+  matchSaved Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, contextKey, jobUrl])
+}
+
+enum MatchStatus {
+  PENDING
+  APPLIED
+}
+
+model Match {
+  id          String      @id @default(uuid(7))
+  userId      String
+  jobUrl      String
+  title       String
+  company     String
+  locations   String[]
+  expMinYears Float?
+  expMaxYears Float?
+  reason      String
+  status      MatchStatus @default(PENDING)
+  matchedAt   DateTime    @default(now())
+
+  @@unique([userId, jobUrl])
+}
+
+enum CacheKind {
+  RESUME
+  JOB_PAGE
+  SOURCE_LISTING
+}
+
+model PageCache {
+  userId    String
+  url       String
+  kind      CacheKind
+  content   Json // markdown string or extracted listings
+  expiresAt DateTime? // null = never expires
+  createdAt DateTime  @default(now())
+
+  @@id([userId, url, kind])
+}
