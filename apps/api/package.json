@@ -3,8 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --env-file=../../.env --watch src/main.ts",
+    "dev": "bun run --parallel --no-exit-on-error dev:server dev:worker",
+    "dev:server": "bun --env-file=../../.env --watch src/main.ts",
+    "dev:worker": "bun --env-file=../../.env --watch src/worker.ts",
     "start": "bun --env-file=../../.env src/main.ts",
+    "start:worker": "bun --env-file=../../.env src/worker.ts",
     "test": "bun --env-file=../../.env test",
     "typecheck": "tsc --noEmit"
   },
