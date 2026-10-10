@@ -11,7 +11,7 @@ export class OpenRouterUnavailable extends Data.TaggedError("OpenRouterUnavailab
 }> {}
 
 export class OpenRouterRequestFailed extends Data.TaggedError("OpenRouterRequestFailed")<{
-  readonly status: number;
+  readonly status: number | null;
   readonly message: string;
 }> {}
 
