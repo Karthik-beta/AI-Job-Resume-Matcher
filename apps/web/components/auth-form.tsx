@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type SubmitEvent, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -34,30 +34,56 @@ function field(data: FormData, name: string) {
   return typeof value === "string" ? value : "";
 }
 
+const errorMessages: Record<string, string> = {
+  USER_ALREADY_EXISTS: "An account with this email already exists. Sign in instead.",
+  USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL:
+    "An account with this email already exists. Sign in instead.",
+  INVALID_EMAIL_OR_PASSWORD: "Email or password is incorrect.",
+  PASSWORD_TOO_SHORT: "Password must be at least 8 characters.",
+};
+
+const unreachable = "Couldn't reach the server. Try again in a moment.";
+
+function errorMessage(error: {
+  code?: string | undefined;
+  message?: string | undefined;
+  status: number;
+}) {
+  const known = error.code ? errorMessages[error.code] : undefined;
+  if (known) return known;
+  if (error.status === 0 || error.status >= 500) return unreachable;
+  return error.message ?? unreachable;
+}
+
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const text = copy[mode];
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
     const email = field(data, "email");
     const password = field(data, "password");
     setError(null);
     setPending(true);
-    const result =
-      mode === "sign-up"
-        ? await authClient.signUp.email({ name: field(data, "name"), email, password })
-        : await authClient.signIn.email({ email, password });
-    setPending(false);
-    if (result.error) {
-      setError(result.error.message ?? "Something went wrong. Try again.");
-      return;
+    try {
+      const result =
+        mode === "sign-up"
+          ? await authClient.signUp.email({ name: field(data, "name"), email, password })
+          : await authClient.signIn.email({ email, password });
+      if (result.error) {
+        setError(errorMessage(result.error));
+        return;
+      }
+      router.push("/");
+      router.refresh();
+    } catch {
+      setError(unreachable);
+    } finally {
+      setPending(false);
     }
-    router.push("/");
-    router.refresh();
   }
 
   return (
