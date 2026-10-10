@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ExampleRun } from "@/components/example-run";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -28,9 +29,14 @@ export default function Home() {
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-5 sm:px-8">
       <header className="flex items-center justify-between py-6">
         <span className="text-lg font-bold tracking-tight">Job Matcher</span>
-        <a href={repoUrl} className={buttonVariants({ variant: "ghost" })}>
-          Source code
-        </a>
+        <nav className="flex items-center gap-1">
+          <a href={repoUrl} className={buttonVariants({ variant: "ghost" })}>
+            Source code
+          </a>
+          <Link href="/sign-in" className={buttonVariants({ variant: "outline" })}>
+            Sign in
+          </Link>
+        </nav>
       </header>
 
       <main className="flex flex-col gap-24 pb-24">
@@ -45,9 +51,9 @@ export default function Home() {
               list, with the reason behind every verdict.
             </p>
             <div className="flex flex-wrap gap-3">
-              <a href={repoUrl} className={buttonVariants({ size: "lg" })}>
-                View source on GitHub
-              </a>
+              <Link href="/sign-up" className={buttonVariants({ size: "lg" })}>
+                Create an account
+              </Link>
               <a
                 href="#how-it-works"
                 className={buttonVariants({ size: "lg", variant: "outline" })}
