@@ -1,0 +1,14 @@
+{
+  "name": "@job-matcher/shared",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "effect": "^4.0.2"
+  }
+}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Schibsted_Grotesk } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
 const schibsted = Schibsted_Grotesk({
@@ -16,7 +17,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${schibsted.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col">{children}</body>
+      <body className="flex min-h-full flex-col">
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }
