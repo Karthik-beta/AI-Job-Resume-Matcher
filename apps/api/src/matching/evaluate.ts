@@ -10,6 +10,7 @@ import {
   openRouterErrorFromStatus,
 } from "./errors";
 import { decodeMatchOutput, type MatchResult } from "./match-output";
+import { checkAccess, type PreflightError } from "./preflight";
 import type { Requirements } from "./requirements";
 
 export const systemPrompt =
@@ -58,7 +59,10 @@ export type EvaluateError =
 
 export class MatchEvaluator extends Context.Service<
   MatchEvaluator,
-  { readonly evaluate: (input: MatchInput) => Effect.Effect<MatchResult, EvaluateError> }
+  {
+    readonly preflight: Effect.Effect<void, PreflightError>;
+    readonly evaluate: (input: MatchInput) => Effect.Effect<MatchResult, EvaluateError>;
+  }
 >()("MatchEvaluator") {}
 
 // Snake case keys, as in the Python app, because the guidance refers to include_unknown.
@@ -95,6 +99,7 @@ export const makeMatchEvaluator = (model: string) =>
     const openRouter = yield* OpenRouterClient.OpenRouterClient;
 
     return MatchEvaluator.of({
+      preflight: checkAccess(openRouter.client.httpClient, model),
       evaluate: (input) =>
         openRouter
           .createChatCompletion({
