@@ -21,6 +21,8 @@ jobs:
           --health-interval 2s --health-timeout 5s --health-retries 15
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_matcher
+      BETTER_AUTH_SECRET: ci-only-secret-not-used-in-production
+      BETTER_AUTH_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
