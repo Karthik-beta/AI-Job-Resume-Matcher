@@ -14,6 +14,7 @@
     "apps/api": {
       "name": "@job-matcher/api",
       "dependencies": {
+        "@effect/ai-openrouter": "4.0.2",
         "@job-matcher/shared": "workspace:*",
         "@mendable/firecrawl-js": "^4.46.0",
         "@nestjs/common": "^12.1.2",
@@ -170,6 +171,8 @@
     "@dotenvx/dotenvx": ["@dotenvx/dotenvx@1.75.1", "", { "dependencies": { "@dotenvx/primitives": "^0.8.0", "commander": "^11.1.0", "conf": "^10.2.0", "dotenv": "^17.2.1", "enquirer": "^2.4.1", "env-paths": "^2.2.1", "execa": "^5.1.1", "fdir": "^6.2.0", "ignore": "^5.3.0", "object-treeify": "1.1.33", "open": "^8.4.2", "picomatch": "^4.0.4", "systeminformation": "^5.22.11", "undici": "^7.11.0", "which": "^4.0.0", "yocto-spinner": "^1.1.0" }, "bin": { "dotenvx": "src/cli/dotenvx.js" } }, "sha512-/BITOC9dmS/edY2zQwZNicQ059O6RKabtQfyEafV0nGtfYRNHYy1DIPiYVcov40+tob9hfmBnbR963dS+EQ1DQ=="],
 
     "@dotenvx/primitives": ["@dotenvx/primitives@0.8.0", "", {}, "sha512-VYJy0uhFm9zTJ1TxBaW/pA8bjbOM/OttaNMwZ1RHG4JKyRG7DhSdiqD1ipQoAyoD22olUtxbP78W9xY3Wd11bg=="],
+
+    "@effect/ai-openrouter": ["@effect/ai-openrouter@4.0.2", "", { "peerDependencies": { "effect": "^4.0.2" } }, "sha512-OUUIehB6TC81GS3Kge9Fy2ML1gY+VH04MBNSh33F3dSkt9tnfw/JSo4cGfk1jUhuR7GRDBIgoztlYhj2ViwSuA=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.4.3", "", {}, "sha512-ichuWTgtd4mOM1G4SpyGJa5trT03lWbMypDV0fUXUCXg5hiHqVAz/bZyV68NqmkLB7WcYmj1RMJVSp8HV/v/ZQ=="],
 

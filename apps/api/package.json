@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@effect/ai-openrouter": "4.0.2",
     "@job-matcher/shared": "workspace:*",
     "@mendable/firecrawl-js": "^4.46.0",
     "@nestjs/common": "^12.1.2",
