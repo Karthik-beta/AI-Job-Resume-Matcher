@@ -9,14 +9,16 @@ const rateLimitRetries = 2;
 // The SDK does not expose response headers, so the hint comes from the 429 message.
 const retryHintPattern = /retry after (\d+(?:\.\d+)?)s/i;
 
-export interface Listing {
-  readonly title: string;
-  readonly url: string;
-  readonly company: string;
-  readonly locations: readonly string[];
-  readonly experienceMinYears: number | null;
-  readonly experienceMaxYears: number | null;
-}
+export const Listing = Schema.Struct({
+  title: Schema.String,
+  url: Schema.String,
+  company: Schema.String,
+  locations: Schema.Array(Schema.String),
+  experienceMinYears: Schema.NullOr(Schema.Number),
+  experienceMaxYears: Schema.NullOr(Schema.Number),
+});
+
+export type Listing = typeof Listing.Type;
 
 export interface ScrapedPage {
   readonly markdown?: string | undefined;
