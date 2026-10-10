@@ -1,0 +1,14 @@
+node_modules/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+apps/api/src/generated/
+
+.env
+.env.*
+!.env.example
+
+.DS_Store
+
