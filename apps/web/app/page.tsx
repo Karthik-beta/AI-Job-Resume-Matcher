@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ExampleRun } from "@/components/example-run";
+import { HeaderNav } from "@/components/header-nav";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -33,9 +34,7 @@ export default function Home() {
           <a href={repoUrl} className={buttonVariants({ variant: "ghost" })}>
             Source code
           </a>
-          <Link href="/sign-in" className={buttonVariants({ variant: "outline" })}>
-            Sign in
-          </Link>
+          <HeaderNav />
         </nav>
       </header>
 
