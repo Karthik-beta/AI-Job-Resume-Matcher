@@ -30,6 +30,8 @@ bun run dev
 
 Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of `openssl rand -base64 32`.
 
+When `.env.example` gains a new variable, copy it into your `.env`. The API refuses to start if a required variable is missing.
+
 If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE_URL`.
 
 ## Scripts

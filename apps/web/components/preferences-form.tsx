@@ -1,7 +1,7 @@
 "use client";
 
 import { UpdateSettings } from "@job-matcher/shared";
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, type SubmitEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -75,7 +75,7 @@ function Form({ settings }: { settings: UpdateSettings }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const input = toInput(new FormData(event.currentTarget), includeUnknown);
     const result = validate(UpdateSettings, input);
