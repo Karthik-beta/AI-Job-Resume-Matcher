@@ -1,18 +1,60 @@
 # Job Matcher
 
-Scrapes job boards, filters listings by location and experience, and checks each job against your resume with an LLM.
+Scrapes the job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM. Matches are saved for you to track, and can be posted to Discord.
 
-Built with Bun, TypeScript, NestJS, Next.js, Effect, PostgreSQL and Prisma.
+Built with Bun, TypeScript, NestJS, Next.js, Effect, PostgreSQL, Prisma, Redis and BullMQ.
+
+**Demo:** _link to be added once the demo host is live (see [deploy/README.md](deploy/README.md))._ The demo runs with `PROVIDERS=fake`, so it uses fixture pages instead of real scrapes and AI calls.
+
+| Analyze | Matches |
+| --- | --- |
+| ![A completed run with two matches](docs/screenshots/analyze.png) | ![Pending matches with a Mark applied button](docs/screenshots/matches.png) |
+
+![Landing page](docs/screenshots/home.png)
+
+## Architecture
+
+```mermaid
+flowchart LR
+  browser([Browser]) --> web[Next.js web app]
+  web -- "/api proxy" --> api[NestJS API]
+  api --> pg[(PostgreSQL)]
+  api -- "enqueue run" --> redis[(Redis / BullMQ)]
+  redis --> worker[Run worker]
+  worker --> pg
+  worker --> firecrawl[Firecrawl]
+  worker --> openrouter[OpenRouter]
+  worker --> discord[Discord webhook]
+```
+
+- **Web** (`apps/web`) is the only public service. It proxies `/api/*` to the API, so the browser talks to one origin and the session cookie stays first-party.
+- **API** (`apps/api`) handles auth, sources, settings, runs and matches. Starting a run only creates a row and queues a job.
+- **Worker** (`apps/api/src/worker.ts`) processes one run at a time:
+  1. Check the OpenRouter key and model.
+  2. Scrape the resume and each source's listings.
+  3. Dedupe and filter the listings.
+  4. Evaluate each job against the resume.
+  5. Save matches and send the Discord alerts.
+- It also runs each user's scheduled re-checks.
+- **Providers:** Firecrawl scrapes pages, OpenRouter evaluates jobs with a strict JSON schema, and Discord receives match alerts. `PROVIDERS=fake` swaps all three for fixtures.
+
+## Design decisions
+
+- **A queue, not the request.** A run scrapes several pages and makes one LLM call per job, which can take minutes on the free Firecrawl plan's 10 requests a minute. The API answers immediately with a queued run, and the page polls for progress. The run id is the job id, so a double click can't queue the same run twice, and a per-user advisory lock stops two runs from starting at once.
+- **Effect only where the failures are.** The matching pipeline (scraping, rate limiting, retries, evaluation, notifications) is written with Effect. That gives it typed errors: a 401 stops the run, a bad page only fails that job, and a Discord failure is just logged. Nest controllers and services stay plain async code. The two meet at one `ManagedRuntime`, built when the worker boots.
+- **The cache lives in Postgres.** Scraped resumes, job pages and source listings are stored per user in a `PageCache` table: listings for 15 minutes, everything else until the user clears it. The cache survives restarts, needs no extra service and can be cleared from Settings. Analysed jobs are keyed by a hash of the resume URL, sources, model and requirements, so running again continues where the last run stopped.
+- **A single worker.** Concurrency is 1, so every run shares one Firecrawl rate limiter, and jobs are checked one at a time and never interleave. This is enough for a personal tool; more throughput would need a shared, Redis-backed limiter first.
 
 ## Project structure
 
 ```
-apps/api    NestJS API
-apps/web    Next.js frontend
-prisma/     database schema and migrations
+apps/api         NestJS API and the run worker
+apps/web         Next.js frontend
+packages/shared  Request schemas shared by both apps
+prisma/          Database schema and migrations
+e2e/             Playwright end-to-end test
+deploy/          Docker Compose stack for one host
 ```
-
-The web app proxies `/api/*` to the API, so the browser only talks to one origin.
 
 ## Getting started
 
@@ -30,7 +72,7 @@ bun run dev
 
 Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of `openssl rand -base64 32`.
 
-Runs are processed by a separate worker, which needs `FIRECRAWL_API_KEY` and `OPENROUTER_API_KEY`. Without them the API still starts, but the worker exits. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
+The worker needs `FIRECRAWL_API_KEY` and `OPENROUTER_API_KEY`. Without them the API still starts, but the worker exits. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
 
 When `.env.example` gains a new variable, copy it into your `.env`. The API refuses to start if a required variable is missing.
 
@@ -44,5 +86,10 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 | `bun run db:migrate` | Create and apply Prisma migrations |
 | `bun run lint` | Lint and format check with Biome |
 | `bun run typecheck` | Type-check every app |
-| `bun run test` | Run tests |
-| `bun run check` | Lint, type-check and test (used by CI) |
+| `bun run test` | Unit and integration tests, with a 90% per-file line coverage threshold |
+| `bun run test:e2e` | Playwright happy path against fake providers |
+| `bun run check` | All of the above (used by CI) |
+
+## Deploying
+
+See [deploy/README.md](deploy/README.md) for running the whole stack on one host with Docker Compose.
