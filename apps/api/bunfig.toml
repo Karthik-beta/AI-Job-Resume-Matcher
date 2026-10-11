@@ -1,6 +1,7 @@
 [test]
 coverage = true
-# Applied to each file, so every module in src/matching stays at 90% of lines or above.
+# Applied to each loaded file (all of src, not only src/matching), so every module stays at
+# 90% of lines or above. src/matching/modules.test.ts loads every matching module.
 # Functions are not enforced: Effect error classes count as uncovered constructors.
 coverageThreshold = { lines = 0.9, functions = 0 }
 coveragePathIgnorePatterns = ["src/generated/**", "test/**"]
