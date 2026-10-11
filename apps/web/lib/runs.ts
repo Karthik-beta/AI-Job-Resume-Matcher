@@ -27,6 +27,7 @@ const JobResult = Schema.Struct({
   isMatch: Schema.NullOr(Schema.Boolean),
   reason: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
+  matchSaved: Schema.Boolean,
 });
 export type JobResult = typeof JobResult.Type;
 
@@ -51,6 +52,9 @@ export const fetchSettings = async () => decodeSettings(await api("/settings"));
 
 export const startRun = async (sourceIds: readonly string[]) =>
   decodeRun(await api("/runs", { method: "POST", body: JSON.stringify({ sourceIds }) }));
+
+export const retrySave = (runId: string, resultId: string) =>
+  api(`/runs/${runId}/results/${resultId}/save`, { method: "POST" });
 
 const pollMs = 2_000;
 
