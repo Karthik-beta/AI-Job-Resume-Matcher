@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
+import { CacheController } from "./cache/cache.controller";
+import { CacheService } from "./cache/cache.service";
 import { HealthController } from "./health/health.controller";
 import { MatchesController } from "./matches/matches.controller";
 import { MatchesService } from "./matches/matches.service";
@@ -21,7 +23,8 @@ import { SourcesService } from "./sources/sources.service";
     SettingsController,
     RunsController,
     MatchesController,
+    CacheController,
   ],
-  providers: [SourcesService, SettingsService, RunsService, MatchesService],
+  providers: [SourcesService, SettingsService, RunsService, MatchesService, CacheService],
 })
 export class AppModule {}
