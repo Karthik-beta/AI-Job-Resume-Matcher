@@ -10,7 +10,8 @@ import type { Queue } from "bullmq";
 import { config } from "../config";
 import { PrismaService } from "../prisma/prisma.service";
 import { createRun } from "./create-run";
-import { type RunJob, runsQueue } from "./runs.queue";
+import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
+import { enqueueRun } from "./schedule";
 
 const recentRuns = 20;
 
@@ -18,7 +19,7 @@ const recentRuns = 20;
 export class RunsService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(runsQueue) private readonly queue: Queue<RunJob>,
+    @InjectQueue(runsQueue) private readonly queue: Queue<RunJob | ScheduledJob>,
   ) {}
 
   list(userId: string) {
@@ -55,14 +56,7 @@ export class RunsService {
     }
     const { run } = created;
 
-    try {
-      await this.queue.add("run", { runId: run.id }, { jobId: run.id, attempts: 1 });
-    } catch {
-      // Without this the QUEUED row would block every later start with a 409.
-      await this.prisma.run.update({
-        where: { id: run.id },
-        data: { status: "FAILED", stopReason: "Could not queue the run", finishedAt: new Date() },
-      });
+    if (!(await enqueueRun(this.queue, this.prisma, run.id))) {
       throw new ServiceUnavailableException("Could not queue the run. Try again shortly.");
     }
     return run;

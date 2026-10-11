@@ -3,13 +3,14 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
-import { runsQueue, type ScheduledJob, scheduledJob, schedulerId } from "../runs/runs.queue";
+import { type RunJob, runsQueue, type ScheduledJob } from "../runs/runs.queue";
+import { syncSchedule } from "../runs/schedule";
 
 @Injectable()
 export class SettingsService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(runsQueue) private readonly queue: Queue<ScheduledJob>,
+    @InjectQueue(runsQueue) private readonly queue: Queue<RunJob | ScheduledJob>,
   ) {}
 
   async get(userId: string): Promise<UpdateSettings> {
@@ -26,19 +27,7 @@ export class SettingsService {
       create: { userId, ...data },
       update: data,
     });
-    await this.syncSchedule(userId, saved.scheduleMinutes);
+    await syncSchedule(this.queue, userId, saved.scheduleMinutes);
     return saved;
-  }
-
-  private async syncSchedule(userId: string, minutes: number | null) {
-    if (minutes === null) {
-      await this.queue.removeJobScheduler(schedulerId(userId));
-      return;
-    }
-    await this.queue.upsertJobScheduler(
-      schedulerId(userId),
-      { every: minutes * 60_000 },
-      { name: scheduledJob, data: { userId }, opts: { attempts: 1 } },
-    );
   }
 }
