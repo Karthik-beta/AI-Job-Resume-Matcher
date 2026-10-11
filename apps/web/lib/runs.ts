@@ -1,6 +1,7 @@
 import { UpdateSettings } from "@job-matcher/shared";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Schema } from "effect";
-import { api } from "@/lib/api";
+import { ApiError, api } from "@/lib/api";
 
 const RunStatus = Schema.Literals(["QUEUED", "RUNNING", "COMPLETED", "STOPPED", "FAILED"]);
 export type RunStatus = typeof RunStatus.Type;
@@ -50,3 +51,16 @@ export const fetchSettings = async () => decodeSettings(await api("/settings"));
 
 export const startRun = async (sourceIds: readonly string[]) =>
   decodeRun(await api("/runs", { method: "POST", body: JSON.stringify({ sourceIds }) }));
+
+const pollMs = 2_000;
+
+// Polls while the run is queued or running. A missing run is not retried.
+export const useRun = (id: string | undefined) =>
+  useQuery({
+    queryKey: ["runs", id],
+    queryFn: id ? () => fetchRun(id) : skipToken,
+    refetchInterval: (query) =>
+      query.state.data && !isActive(query.state.data.status) ? false : pollMs,
+    retry: (failures, error) =>
+      !(error instanceof ApiError && error.status === 404) && failures < 3,
+  });

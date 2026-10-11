@@ -4,7 +4,7 @@ import { Separator } from "@/components/ui/separator";
 import { type Verdict, VerdictBadge } from "@/components/verdict-badge";
 import { isActive, type JobResult, type RunDetail, type RunStatus } from "@/lib/runs";
 
-const titles: Record<RunStatus, string> = {
+export const statusLabels: Record<RunStatus, string> = {
   QUEUED: "Waiting to start",
   RUNNING: "Running",
   COMPLETED: "Completed",
@@ -41,7 +41,7 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
     <Card className="[--card-spacing:--spacing(5)]">
       <CardHeader className="gap-3">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <CardTitle className="text-base">{titles[run.status]}</CardTitle>
+          <CardTitle className="text-base">{statusLabels[run.status]}</CardTitle>
           <CardDescription>Started {startedAt}</CardDescription>
         </div>
         {run.stopReason && <p className="text-sm text-destructive">{run.stopReason}</p>}
@@ -57,6 +57,11 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
           className="[&_[data-slot=progress-indicator]]:bg-match"
         />
       </CardHeader>
+      {run.results.length === 0 && !isActive(run.status) && (
+        <CardContent>
+          <p className="text-sm text-muted-foreground">No jobs were checked in this run.</p>
+        </CardContent>
+      )}
       {run.results.length > 0 && (
         <CardContent className="px-0">
           <ul>
