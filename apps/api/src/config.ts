@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 const Env = Schema.Struct({
   DATABASE_URL: Schema.NonEmptyString,
@@ -7,6 +7,10 @@ const Env = Schema.Struct({
   BETTER_AUTH_URL: Schema.NonEmptyString,
   REDIS_URL: Schema.NonEmptyString,
   OPENROUTER_MODEL: Schema.NonEmptyString,
+  // "fake" swaps Firecrawl, OpenRouter and Discord for fixtures, for tests and demos.
+  PROVIDERS: Schema.Literals(["live", "fake"]).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("live" as const)),
+  ),
 });
 
 export const config = Schema.decodeUnknownSync(Env)(process.env);
