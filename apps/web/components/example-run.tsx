@@ -1,7 +1,7 @@
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
+import { type Verdict, VerdictBadge } from "@/components/verdict-badge";
 
 type Segment = string | { met: string };
 
@@ -9,7 +9,7 @@ type ExampleJob = {
   title: string;
   company: string;
   location: string;
-  verdict: "match" | "no-match" | "failed" | "checking";
+  verdict: Verdict;
   reason: Segment[];
 };
 
@@ -64,23 +64,6 @@ const jobs: ExampleJob[] = [
 ];
 
 const checked = jobs.filter((job) => job.verdict !== "checking").length;
-
-function Verdict({ verdict }: { verdict: ExampleJob["verdict"] }) {
-  switch (verdict) {
-    case "match":
-      return <Badge className="bg-match text-primary-foreground">Match</Badge>;
-    case "no-match":
-      return <Badge variant="outline">No match</Badge>;
-    case "failed":
-      return <Badge variant="destructive">Couldn't check</Badge>;
-    case "checking":
-      return (
-        <Badge variant="secondary" className="motion-safe:animate-pulse">
-          Checking
-        </Badge>
-      );
-  }
-}
 
 function Reason({ segments }: { segments: Segment[] }) {
   return (
@@ -145,7 +128,7 @@ export function ExampleRun() {
                       {job.company}, {job.location}
                     </p>
                   </div>
-                  <Verdict verdict={job.verdict} />
+                  <VerdictBadge verdict={job.verdict} />
                 </div>
                 {job.reason.length > 0 && <Reason segments={job.reason} />}
               </div>

@@ -8,9 +8,14 @@ export function HeaderNav() {
   const { data: session } = authClient.useSession();
 
   return session ? (
-    <Link href="/settings" className={buttonVariants({ variant: "outline" })}>
-      Settings
-    </Link>
+    <>
+      <Link href="/analyze" className={buttonVariants({ variant: "ghost" })}>
+        Analyze
+      </Link>
+      <Link href="/settings" className={buttonVariants({ variant: "outline" })}>
+        Settings
+      </Link>
+    </>
   ) : (
     <Link href="/sign-in" className={buttonVariants({ variant: "outline" })}>
       Sign in
