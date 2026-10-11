@@ -98,6 +98,8 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 | `bun run test:e2e` | Playwright happy path against fake providers |
 | `bun run check` | All of the above (used by CI) |
 
+`bun install` points git at `.githooks`. The pre-commit hook runs lint and typecheck, and the commit-msg hook rejects `Co-Authored-By` and "Generated with" lines. Merge commits skip the message check.
+
 ## Deploying
 
 See [deploy/README.md](deploy/README.md) for running the whole stack on one host with Docker Compose.

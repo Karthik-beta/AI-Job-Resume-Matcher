@@ -1,0 +1,10 @@
+#!/bin/sh
+# Rejects co-author and "Generated with" trailers. Merge commits are skipped.
+git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
+
+# Stop at the scissors line: `git commit -v` appends the diff below it.
+if sed '/^# -* >8 -*$/q' "$1" | grep -v '^#' |
+  LC_ALL=C grep -iqE '^[[:space:]]*co-authored-by:|^[^[:alnum:]]*generated with '; then
+  echo "commit-msg: remove the Co-Authored-By / \"Generated with\" lines from the message." >&2
+  exit 1
+fi
