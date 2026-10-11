@@ -12,6 +12,9 @@ export function HeaderNav() {
       <Link href="/analyze" className={buttonVariants({ variant: "ghost" })}>
         Analyze
       </Link>
+      <Link href="/matches" className={buttonVariants({ variant: "ghost" })}>
+        Matches
+      </Link>
       <Link href="/settings" className={buttonVariants({ variant: "outline" })}>
         Settings
       </Link>
