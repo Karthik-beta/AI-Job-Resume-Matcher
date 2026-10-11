@@ -1,0 +1,52 @@
+import { UpdateSettings } from "@job-matcher/shared";
+import { Schema } from "effect";
+import { api } from "@/lib/api";
+
+const RunStatus = Schema.Literals(["QUEUED", "RUNNING", "COMPLETED", "STOPPED", "FAILED"]);
+export type RunStatus = typeof RunStatus.Type;
+
+const Run = Schema.Struct({
+  id: Schema.String,
+  status: RunStatus,
+  sourceIds: Schema.Array(Schema.String),
+  found: Schema.Number,
+  eligible: Schema.Number,
+  checked: Schema.Number,
+  failed: Schema.Number,
+  stopReason: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+export type Run = typeof Run.Type;
+
+const JobResult = Schema.Struct({
+  id: Schema.String,
+  jobUrl: Schema.String,
+  title: Schema.String,
+  company: Schema.String,
+  isMatch: Schema.NullOr(Schema.Boolean),
+  reason: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+});
+export type JobResult = typeof JobResult.Type;
+
+const RunDetail = Schema.Struct({ ...Run.fields, results: Schema.Array(JobResult) });
+export type RunDetail = typeof RunDetail.Type;
+
+const Source = Schema.Struct({ id: Schema.String, url: Schema.String });
+export type Source = typeof Source.Type;
+
+const decodeRun = Schema.decodeUnknownSync(Run);
+const decodeRuns = Schema.decodeUnknownSync(Schema.Array(Run));
+const decodeRunDetail = Schema.decodeUnknownSync(RunDetail);
+const decodeSources = Schema.decodeUnknownSync(Schema.Array(Source));
+const decodeSettings = Schema.decodeUnknownSync(UpdateSettings);
+
+export const isActive = (status: RunStatus) => status === "QUEUED" || status === "RUNNING";
+
+export const fetchRuns = async () => decodeRuns(await api("/runs"));
+export const fetchRun = async (id: string) => decodeRunDetail(await api(`/runs/${id}`));
+export const fetchSources = async () => decodeSources(await api("/sources"));
+export const fetchSettings = async () => decodeSettings(await api("/settings"));
+
+export const startRun = async (sourceIds: readonly string[]) =>
+  decodeRun(await api("/runs", { method: "POST", body: JSON.stringify({ sourceIds }) }));
