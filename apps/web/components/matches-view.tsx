@@ -28,13 +28,13 @@ function Matches() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div role="tablist" aria-label="Application status" className="flex gap-1 border-b">
+      <fieldset className="flex gap-1 border-b">
+        <legend className="sr-only">Application status</legend>
         {tabs.map((tab) => (
           <button
             key={tab.status}
             type="button"
-            role="tab"
-            aria-selected={status === tab.status}
+            aria-pressed={status === tab.status}
             onClick={() => setStatus(tab.status)}
             className={cn(
               "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
@@ -46,7 +46,7 @@ function Matches() {
             {tab.label}
           </button>
         ))}
-      </div>
+      </fieldset>
       {matches.isError && <p className="text-destructive">Could not load your matches.</p>}
       {matches.data?.length === 0 && (
         <p className="text-muted-foreground">

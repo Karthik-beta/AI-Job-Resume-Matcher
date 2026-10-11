@@ -71,6 +71,18 @@ describe("matches", () => {
       .expect(200);
     expect(response.body).toMatchObject({ id: match.id, status: "APPLIED" });
     await alice.patch(`/api/matches/${match.id}`).send({ status: "DONE" }).expect(400);
+
+    await alice.patch(`/api/matches/${match.id}`).send({ status: "PENDING" }).expect(200);
+    const pending = await alice.get("/api/matches?status=PENDING").expect(200);
+    expect(pending.body.map(({ id }: { id: string }) => id)).toContain(match.id);
+  });
+
+  it("rejects unknown matches and requests without a session", async () => {
+    await alice.patch("/api/matches/missing").send({ status: "APPLIED" }).expect(404);
+    await request(app.getHttpServer())
+      .patch("/api/matches/missing")
+      .send({ status: "APPLIED" })
+      .expect(401);
   });
 
   it("does not let another user update a match", async () => {
