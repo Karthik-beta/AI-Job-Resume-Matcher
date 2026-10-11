@@ -12,6 +12,7 @@ import { contextKey } from "../matching/context-key";
 import { PrismaService } from "../prisma/prisma.service";
 import { requirementsOf } from "./run-settings";
 import { type RunJob, runsQueue } from "./runs.queue";
+import { upsertMatch } from "./save-match";
 
 const recentRuns = 20;
 
@@ -37,6 +38,37 @@ export class RunsService {
     });
     if (!run) throw new NotFoundException("Run not found");
     return run;
+  }
+
+  // Saves a match whose first save failed, without scraping or evaluating the job again.
+  async retrySave(userId: string, runId: string, resultId: string) {
+    const result = await this.prisma.jobResult.findFirst({
+      where: { id: resultId, runId, userId },
+    });
+    if (!result) throw new NotFoundException("Result not found");
+    if (result.isMatch !== true) throw new ConflictException("Only a match can be saved");
+    if (result.matchSaved) return result;
+
+    await upsertMatch(this.prisma, userId, {
+      jobUrl: result.jobUrl,
+      title: result.title,
+      company: result.company,
+      locations: result.locations,
+      expMinYears: result.expMinYears,
+      expMaxYears: result.expMaxYears,
+      reason: result.reason ?? "",
+    });
+    return this.prisma.$transaction(async (tx) => {
+      // Only the request that flips the flag adjusts the counter, so two quick retries count once.
+      const { count } = await tx.jobResult.updateMany({
+        where: { id: result.id, matchSaved: false },
+        data: { matchSaved: true },
+      });
+      if (count === 1) {
+        await tx.run.update({ where: { id: runId }, data: { failed: { decrement: 1 } } });
+      }
+      return tx.jobResult.findUniqueOrThrow({ where: { id: result.id } });
+    });
   }
 
   async start(userId: string, sourceIds: readonly string[]) {

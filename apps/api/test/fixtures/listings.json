@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Backend Engineer, Payments",
+    "url": "https://jobs.example.com/backend-payments",
+    "company": "Northwind Labs",
+    "locations": ["Bengaluru"],
+    "experienceMinYears": 2,
+    "experienceMaxYears": 5
+  },
+  {
+    "title": "Senior Platform Engineer",
+    "url": "https://jobs.example.com/senior-platform",
+    "company": "Tidepool Systems",
+    "locations": ["Pune"],
+    "experienceMinYears": 6,
+    "experienceMaxYears": null
+  },
+  {
+    "title": "Full Stack Developer",
+    "url": "https://jobs.example.com/full-stack",
+    "company": "Fieldnote",
+    "locations": [],
+    "experienceMinYears": null,
+    "experienceMaxYears": null
+  }
+]

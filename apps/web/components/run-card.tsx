@@ -1,3 +1,4 @@
+import { RetrySaveButton } from "@/components/retry-save-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
@@ -87,6 +88,12 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
                     <p className="text-sm leading-relaxed text-muted-foreground">
                       {result.error ?? result.reason}
                     </p>
+                  )}
+                  {result.isMatch === true && !result.matchSaved && (
+                    <>
+                      <p className="text-sm text-destructive">This match could not be saved.</p>
+                      <RetrySaveButton runId={run.id} resultId={result.id} />
+                    </>
                   )}
                 </div>
               </li>
