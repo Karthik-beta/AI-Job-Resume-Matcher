@@ -17,6 +17,7 @@ COPY apps/api apps/api
 ENV NODE_ENV=production
 # Bun reads tsconfig (decorator settings) from the working directory.
 WORKDIR /app/apps/api
+USER bun
 EXPOSE 4000
 CMD ["bun", "src/main.ts"]
 
@@ -25,6 +26,7 @@ COPY apps/web apps/web
 # Next.js resolves rewrites at build time, so the API address is a build argument.
 ARG API_URL=http://api:4000
 ENV API_URL=$API_URL NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
-RUN bun run --cwd apps/web build
+RUN bun run --cwd apps/web build && chown -R bun:bun apps/web/.next
+USER bun
 EXPOSE 3000
 CMD ["bun", "run", "--cwd", "apps/web", "start"]

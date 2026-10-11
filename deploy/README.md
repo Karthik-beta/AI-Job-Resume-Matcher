@@ -11,8 +11,8 @@ The whole stack runs on one host with Docker Compose: the web app, the API, the 
    cp deploy/.env.example deploy/.env
    ```
 
-   - `POSTGRES_PASSWORD` and `BETTER_AUTH_SECRET`: long random values, e.g. `openssl rand -hex 32`.
-   - `BETTER_AUTH_URL`: the public URL people will open.
+   - `POSTGRES_PASSWORD` and `BETTER_AUTH_SECRET`: long random values, e.g. `openssl rand -hex 32`. The stack refuses to start while either is empty.
+   - `BETTER_AUTH_URL`: the exact origin people will open, including the port when `WEB_PORT` is not 80. Sign-in fails if it does not match.
    - `PROVIDERS=fake` runs the demo on fixtures, so it needs no Firecrawl or OpenRouter keys and costs nothing. Set `PROVIDERS=live` and both keys to scrape real pages.
 
 3. Build and start:
