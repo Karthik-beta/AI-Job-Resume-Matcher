@@ -207,9 +207,11 @@ describe("run status", () => {
     });
     const path = `/api/runs/${run.id}/results/${result.id}/save`;
 
-    const response = await carol.post(path).expect(200);
-    expect(response.body).toMatchObject({ id: result.id, matchSaved: true });
-    await carol.post(path).expect(200);
+    const responses = await Promise.all([carol.post(path), carol.post(path)]);
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ id: result.id, matchSaved: true });
+    }
 
     const match = await prisma.match.findUniqueOrThrow({
       where: { userId_jobUrl: { userId: carolId, jobUrl: "https://jobs.example.com/retry" } },

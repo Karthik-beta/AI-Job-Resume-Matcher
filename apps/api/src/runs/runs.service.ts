@@ -58,11 +58,17 @@ export class RunsService {
       expMaxYears: result.expMaxYears,
       reason: result.reason ?? "",
     });
-    const [saved] = await this.prisma.$transaction([
-      this.prisma.jobResult.update({ where: { id: result.id }, data: { matchSaved: true } }),
-      this.prisma.run.update({ where: { id: runId }, data: { failed: { decrement: 1 } } }),
-    ]);
-    return saved;
+    return this.prisma.$transaction(async (tx) => {
+      // Only the request that flips the flag adjusts the counter, so two quick retries count once.
+      const { count } = await tx.jobResult.updateMany({
+        where: { id: result.id, matchSaved: false },
+        data: { matchSaved: true },
+      });
+      if (count === 1) {
+        await tx.run.update({ where: { id: runId }, data: { failed: { decrement: 1 } } });
+      }
+      return tx.jobResult.findUniqueOrThrow({ where: { id: result.id } });
+    });
   }
 
   async start(userId: string, sourceIds: readonly string[]) {
