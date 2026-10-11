@@ -3,6 +3,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import type { Queue } from "bullmq";
@@ -12,12 +13,31 @@ import { PrismaService } from "../prisma/prisma.service";
 import { requirementsOf } from "./run-settings";
 import { type RunJob, runsQueue } from "./runs.queue";
 
+const recentRuns = 20;
+
 @Injectable()
 export class RunsService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(runsQueue) private readonly queue: Queue<RunJob>,
   ) {}
+
+  list(userId: string) {
+    return this.prisma.run.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: recentRuns,
+    });
+  }
+
+  async get(userId: string, id: string) {
+    const run = await this.prisma.run.findFirst({
+      where: { id, userId },
+      include: { results: { orderBy: { createdAt: "asc" } } },
+    });
+    if (!run) throw new NotFoundException("Run not found");
+    return run;
+  }
 
   async start(userId: string, sourceIds: readonly string[]) {
     const ids = [...new Set(sourceIds)];
