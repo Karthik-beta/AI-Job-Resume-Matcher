@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
-import { MatchOutputInvalid, ModelUnsupported, OpenRouterAuthError } from "../src/matching/errors";
+import { Notifier } from "../src/matching/discord";
+import {
+  MatchOutputInvalid,
+  ModelUnsupported,
+  NotifyFailed,
+  OpenRouterAuthError,
+} from "../src/matching/errors";
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
@@ -43,10 +49,20 @@ describe("process run", () => {
     options: {
       verdicts?: Record<string, Verdict>;
       preflight?: Effect.Effect<void, ModelUnsupported>;
+      failAlerts?: boolean;
     },
   ) => {
     const evaluated: string[] = [];
     const scraped: string[] = [];
+    const alerts: { webhookUrl: string; jobUrl: string }[] = [];
+    const notifier = Notifier.of({
+      notifyMatch: (webhookUrl, alert) =>
+        options.failAlerts
+          ? Effect.fail(new NotifyFailed({ message: "Discord returned 500." }))
+          : Effect.sync(() => {
+              alerts.push({ webhookUrl, jobUrl: alert.jobUrl });
+            }),
+    });
     const firecrawl = Firecrawl.of({
       scrapeMarkdown: (url) =>
         Effect.sync(() => {
@@ -80,10 +96,11 @@ describe("process run", () => {
         MatchEvaluator.of({ preflight: options.preflight ?? Effect.void, evaluate }),
       ),
       pageCacheStoreLayer(prisma),
+      Layer.succeed(Notifier, notifier),
     );
     await Effect.runPromise(processRun(prisma, runId).pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
-    return { run, evaluated, scraped };
+    return { run, evaluated, scraped, alerts };
   };
 
   const jobUrl = (id: string) => `https://jobs.example.com/${id}`;
@@ -114,10 +131,11 @@ describe("process run", () => {
   });
 
   it("dedupes and filters listings, then analyses up to the run size", async () => {
-    const { run, evaluated } = await runWith(await startRun(), {
+    const { run, evaluated, alerts } = await runWith(await startRun(), {
       verdicts: { [jobUrl("1")]: "match", [jobUrl("4")]: "invalid" },
     });
 
+    expect(alerts).toEqual([]);
     expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
     expect(run).toMatchObject({
       status: "COMPLETED",
@@ -179,6 +197,52 @@ describe("process run", () => {
 
     expect(scraped).toEqual([]);
     expect(run).toMatchObject({ status: "STOPPED", stopReason: "Unsupported model", found: 0 });
+  });
+
+  it("keeps an applied match's status and stores the listing details", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.match.update({
+      where: { userId_jobUrl: { userId, jobUrl: jobUrl("1") } },
+      data: { status: "APPLIED" },
+    });
+    const { run } = await runWith(await startRun(), {
+      verdicts: { [jobUrl("1")]: "match" },
+    });
+
+    const match = await prisma.match.findUniqueOrThrow({
+      where: { userId_jobUrl: { userId, jobUrl: jobUrl("1") } },
+    });
+    expect(match).toMatchObject({ status: "APPLIED", reason: "Strong fit" });
+    const result = await prisma.jobResult.findFirstOrThrow({
+      where: { runId: run.id, jobUrl: jobUrl("1") },
+    });
+    expect(result).toMatchObject({
+      locations: ["Bengaluru"],
+      expMinYears: null,
+      matchSaved: true,
+    });
+  });
+
+  it("alerts the webhook only for saved matches, and keeps the match when the alert fails", async () => {
+    const webhookUrl = "https://discord.com/api/webhooks/1/token";
+    await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: webhookUrl } });
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const verdicts = { [jobUrl("1")]: "match", [jobUrl("4")]: "match" } as const;
+
+    const { alerts } = await runWith(await startRun(), { verdicts });
+    expect(alerts).toEqual([
+      { webhookUrl, jobUrl: jobUrl("1") },
+      { webhookUrl, jobUrl: jobUrl("4") },
+    ]);
+
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const failing = await runWith(await startRun(), { verdicts, failAlerts: true });
+    expect(failing.run).toMatchObject({ status: "COMPLETED", failed: 0 });
+    const saved = await prisma.jobResult.count({
+      where: { runId: failing.run.id, matchSaved: true },
+    });
+    expect(saved).toBe(2);
+    await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: null } });
   });
 
   it("ignores a run that is no longer queued", async () => {

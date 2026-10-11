@@ -66,19 +66,22 @@ model Run {
 }
 
 model JobResult {
-  id         String   @id @default(uuid(7))
-  runId      String
-  run        Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
-  userId     String
-  contextKey String
-  jobUrl     String
-  title      String
-  company    String
-  isMatch    Boolean? // null when the job errored
-  reason     String?
-  error      String?
-  matchSaved Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id          String   @id @default(uuid(7))
+  runId       String
+  run         Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  userId      String
+  contextKey  String
+  jobUrl      String
+  title       String
+  company     String
+  locations   String[]
+  expMinYears Float?
+  expMaxYears Float?
+  isMatch     Boolean? // null when the job errored
+  reason      String?
+  error       String?
+  matchSaved  Boolean  @default(false)
+  createdAt   DateTime @default(now())
 
   @@unique([userId, contextKey, jobUrl])
 }

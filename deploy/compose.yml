@@ -1,0 +1,73 @@
+# Production stack on one host. Secrets come from deploy/.env on the host, never from git.
+name: job-matcher
+
+x-api: &api
+  build: { context: .., target: api }
+  image: job-matcher-api
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/job_matcher
+    REDIS_URL: redis://redis:6379
+  restart: unless-stopped
+  depends_on:
+    migrate: { condition: service_completed_successfully }
+    redis: { condition: service_healthy }
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: job_matcher
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d job_matcher"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:8
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  # Applies pending migrations before the API and worker start.
+  migrate:
+    <<: *api
+    command: ["bunx", "--bun", "prisma", "migrate", "deploy"]
+    working_dir: /app
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *api
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const r = await fetch('http://localhost:4000/api/health'); process.exit(r.ok ? 0 : 1)"]
+      interval: 10s
+      retries: 10
+
+  worker:
+    <<: *api
+    command: ["bun", "src/worker.ts"]
+
+  web:
+    build: { context: .., target: web, args: { API_URL: http://api:4000 } }
+    image: job-matcher-web
+    ports:
+      - "${WEB_PORT:-80}:3000"
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  postgres-data:
+  redis-data:
