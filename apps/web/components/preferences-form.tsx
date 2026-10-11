@@ -1,6 +1,6 @@
 "use client";
 
-import { UpdateSettings } from "@job-matcher/shared";
+import { isDiscordWebhookUrl, UpdateSettings } from "@job-matcher/shared";
 import { type ReactNode, type SubmitEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -44,14 +44,24 @@ function toInput(data: FormData, includeUnknown: boolean) {
 
 export function PreferencesForm() {
   const [settings, setSettings] = useState<UpdateSettings | null>(null);
+  const [refusedWebhook, setRefusedWebhook] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     api("/settings")
       .then((body) => {
-        const { value } = validate(UpdateSettings, body);
-        if (value) setSettings(value);
-        else setLoadError(true);
+        // A webhook saved before only Discord URLs were accepted gets no alerts. Load the rest of
+        // the settings and flag it, instead of failing the whole form.
+        const saved = (body as { discordWebhookUrl?: unknown }).discordWebhookUrl;
+        const refused = typeof saved === "string" && !isDiscordWebhookUrl(saved) ? saved : null;
+        const { value } = validate(
+          UpdateSettings,
+          refused ? { ...(body as object), discordWebhookUrl: null } : body,
+        );
+        if (value) {
+          setSettings(value);
+          setRefusedWebhook(refused);
+        } else setLoadError(true);
       })
       .catch(() => setLoadError(true));
   }, []);
@@ -65,14 +75,27 @@ export function PreferencesForm() {
         </p>
       </div>
       {loadError && <FieldError>Could not load your preferences.</FieldError>}
-      {settings && <Form settings={settings} />}
+      {settings && <Form settings={settings} refusedWebhook={refusedWebhook} />}
     </section>
   );
 }
 
-function Form({ settings }: { settings: UpdateSettings }) {
+function Form({
+  settings,
+  refusedWebhook,
+}: {
+  settings: UpdateSettings;
+  refusedWebhook: string | null;
+}) {
   const [includeUnknown, setIncludeUnknown] = useState(settings.includeUnknown);
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>(
+    refusedWebhook
+      ? {
+          discordWebhookUrl:
+            "Alerts are not being sent: this is not a Discord webhook URL. Replace it or clear it.",
+        }
+      : {},
+  );
   const [pending, setPending] = useState(false);
 
   async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
@@ -203,7 +226,7 @@ function Form({ settings }: { settings: UpdateSettings }) {
           <Input
             id="discordWebhookUrl"
             name="discordWebhookUrl"
-            defaultValue={settings.discordWebhookUrl ?? ""}
+            defaultValue={settings.discordWebhookUrl ?? refusedWebhook ?? ""}
           />,
           "Matches are posted to this channel. Leave empty to skip.",
         )}
