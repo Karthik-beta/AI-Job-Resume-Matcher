@@ -4,7 +4,14 @@ Scrapes the job boards you follow, filters listings by location and experience, 
 
 Built with Bun, TypeScript, NestJS, Next.js, Effect, PostgreSQL, Prisma, Redis and BullMQ.
 
-**Demo:** _link to be added once the demo host is live (see [deploy/README.md](deploy/README.md))._ The demo runs with `PROVIDERS=fake`, so it uses fixture pages instead of real scrapes and AI calls.
+**Demo:** there is no hosted demo; run it locally instead. With `PROVIDERS=fake` it uses fixture pages instead of real scrapes and AI calls, so it needs no API keys:
+
+```bash
+cp deploy/.env.example deploy/.env   # fill in POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BETTER_AUTH_URL=http://localhost:8080
+WEB_PORT=8080 docker compose -f deploy/compose.yml up -d --build
+```
+
+Then open http://localhost:8080, sign up, add any careers page URL and a resume URL in Settings, and press Analyze.
 
 | Analyze | Matches |
 | --- | --- |
