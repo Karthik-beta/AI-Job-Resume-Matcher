@@ -20,7 +20,7 @@ test("sign up, analyse a source and mark the match as applied", async ({ page })
   // With no experience set, only the listing without an experience range passes the filters.
   await page.goto("/analyze");
   await page.getByRole("button", { name: "Analyze" }).click();
-  await expect(page.getByText("Completed")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Completed")).toBeVisible();
   await expect(page.getByText("Full Stack Developer")).toBeVisible();
   await expect(page.getByText("Match", { exact: true })).toBeVisible();
 
