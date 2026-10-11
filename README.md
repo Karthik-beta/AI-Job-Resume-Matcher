@@ -100,6 +100,19 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 
 `bun install` points git at `.githooks`. The pre-commit hook runs lint and typecheck, and the commit-msg hook rejects `Co-Authored-By` and "Generated with" lines. Merge commits skip the message check.
 
+## Pull requests
+
+`master` is protected, for admins too: a commit needs a passing CircleCI `check` status before it can land, and force pushes and deletion are blocked.
+
+A PR stacked on another feature branch must be retargeted before its base branch goes away. GitHub closes a PR whose base branch is deleted, and it can't be reopened. To merge a stack:
+
+1. Merge the bottom PR into `master`. Keep its branch for now.
+2. Change the base of the next PR to `master` (`gh pr edit <number> --base master`), and merge `master` into its branch if GitHub reports conflicts.
+3. Only then delete the merged branch.
+4. Repeat for each PR up the stack.
+
+Before merging, check the base shown at the top of the PR is `master`, so it doesn't land in another feature branch.
+
 ## Deploying
 
 See [deploy/README.md](deploy/README.md) for running the whole stack on one host with Docker Compose.
