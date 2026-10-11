@@ -8,6 +8,7 @@ import { MatchesService } from "./matches/matches.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
+import { MatchAlerts } from "./runs/match-alerts";
 import { RunsController } from "./runs/runs.controller";
 import { RunsService } from "./runs/runs.service";
 import { SettingsController } from "./settings/settings.controller";
@@ -25,6 +26,13 @@ import { SourcesService } from "./sources/sources.service";
     MatchesController,
     CacheController,
   ],
-  providers: [SourcesService, SettingsService, RunsService, MatchesService, CacheService],
+  providers: [
+    SourcesService,
+    SettingsService,
+    RunsService,
+    MatchesService,
+    CacheService,
+    MatchAlerts,
+  ],
 })
 export class AppModule {}

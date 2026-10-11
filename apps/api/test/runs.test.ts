@@ -1,10 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it, spyOn } from "bun:test";
 import { defaultSettings } from "@job-matcher/shared";
 import { getQueueToken } from "@nestjs/bullmq";
 import type { INestApplication } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import request from "supertest";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { MatchAlerts } from "../src/runs/match-alerts";
 import type { RunJob } from "../src/runs/runs.queue";
 import { signUp, startApp } from "./helpers";
 
@@ -130,6 +131,7 @@ describe("run status", () => {
   afterAll(async () => {
     await prisma.run.deleteMany({ where: { userId: carolId } });
     await prisma.match.deleteMany({ where: { userId: carolId } });
+    await prisma.settings.deleteMany({ where: { userId: carolId } });
     await app.close();
   });
 
@@ -220,6 +222,57 @@ describe("run status", () => {
     const updated = await prisma.run.findUniqueOrThrow({ where: { id: run.id } });
     expect(updated.failed).toBe(0);
     await dave.post(path).expect(404);
+  });
+
+  it("sends the Discord alert once after a retried save", async () => {
+    const webhook = "https://discord.com/api/webhooks/1/token";
+    await prisma.settings.upsert({
+      where: { userId: carolId },
+      create: { userId: carolId, discordWebhookUrl: webhook },
+      update: { discordWebhookUrl: webhook },
+    });
+    const send = spyOn(app.get(MatchAlerts), "send");
+    try {
+      const run = await createRun(new Date());
+      await prisma.run.update({ where: { id: run.id }, data: { checked: 1, failed: 1 } });
+      const result = await prisma.jobResult.create({
+        data: {
+          runId: run.id,
+          userId: carolId,
+          contextKey: "retry",
+          jobUrl: "https://jobs.example.com/retry-alert",
+          title: "Engineer",
+          company: "Example",
+          isMatch: true,
+          reason: "Strong fit",
+        },
+      });
+      const path = `/api/runs/${run.id}/results/${result.id}/save`;
+
+      await Promise.all([carol.post(path).expect(200), carol.post(path).expect(200)]);
+      await carol.post(path).expect(200);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(webhook, {
+        title: "Engineer",
+        company: "Example",
+        jobUrl: "https://jobs.example.com/retry-alert",
+        reason: "Strong fit",
+      });
+    } finally {
+      send.mockRestore();
+      await prisma.settings.update({
+        where: { userId: carolId },
+        data: { discordWebhookUrl: null },
+      });
+    }
+  });
+
+  it("only logs an alert that fails", async () => {
+    const alert = { title: "Engineer", company: "Example", jobUrl: "https://x.test", reason: "" };
+    await expect(
+      app.get(MatchAlerts).send("https://example.com/not-discord", alert),
+    ).resolves.toBeUndefined();
   });
 
   it("only saves results that are matches", async () => {
