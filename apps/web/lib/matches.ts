@@ -14,11 +14,15 @@ const Match = Schema.Struct({
 });
 export type Match = typeof Match.Type;
 
-const decodeMatches = Schema.decodeUnknownSync(Schema.Array(Match));
+const decodeMatchesPage = Schema.decodeUnknownSync(
+  Schema.Struct({ items: Schema.Array(Match), nextCursor: Schema.NullOr(Schema.String) }),
+);
 const decodeMatch = Schema.decodeUnknownSync(Match);
 
-export const fetchMatches = async (status: MatchStatus) =>
-  decodeMatches(await api(`/matches?status=${status}`));
+export const fetchMatches = async (status: MatchStatus, cursor: string | null) =>
+  decodeMatchesPage(
+    await api(`/matches?${new URLSearchParams({ status, ...(cursor && { cursor }) })}`),
+  );
 
 export const setMatchStatus = async (id: string, status: MatchStatus) =>
   decodeMatch(await api(`/matches/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }));

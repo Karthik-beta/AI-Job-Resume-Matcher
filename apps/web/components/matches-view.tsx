@@ -1,7 +1,7 @@
 "use client";
 
 import type { MatchStatus } from "@job-matcher/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -24,7 +24,13 @@ export function MatchesView() {
 
 function Matches() {
   const [status, setStatus] = useState<MatchStatus>("PENDING");
-  const matches = useQuery({ queryKey: ["matches", status], queryFn: () => fetchMatches(status) });
+  const matches = useInfiniteQuery({
+    queryKey: ["matches", status],
+    queryFn: ({ pageParam }) => fetchMatches(status, pageParam),
+    initialPageParam: null as string | null,
+    getNextPageParam: (page) => page.nextCursor,
+  });
+  const items = matches.data?.pages.flatMap((page) => page.items);
 
   return (
     <div className="flex flex-col gap-6">
@@ -48,19 +54,29 @@ function Matches() {
         ))}
       </fieldset>
       {matches.isError && <p className="text-destructive">Could not load your matches.</p>}
-      {matches.data?.length === 0 && (
+      {items?.length === 0 && (
         <p className="text-muted-foreground">
           {status === "PENDING"
             ? "No pending matches. New matches from your runs appear here."
             : "Nothing marked as applied yet."}
         </p>
       )}
-      {matches.data && matches.data.length > 0 && (
+      {items && items.length > 0 && (
         <ul className="divide-y border-y">
-          {matches.data.map((match) => (
+          {items.map((match) => (
             <MatchItem key={match.id} match={match} />
           ))}
         </ul>
+      )}
+      {matches.hasNextPage && (
+        <Button
+          variant="outline"
+          className="self-center"
+          disabled={matches.isFetchingNextPage}
+          onClick={() => matches.fetchNextPage()}
+        >
+          {matches.isFetchingNextPage ? "Loading" : "Load more"}
+        </Button>
       )}
     </div>
   );
