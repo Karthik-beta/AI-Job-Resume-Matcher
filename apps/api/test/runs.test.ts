@@ -129,6 +129,7 @@ describe("run status", () => {
 
   afterAll(async () => {
     await prisma.run.deleteMany({ where: { userId: carolId } });
+    await prisma.match.deleteMany({ where: { userId: carolId } });
     await app.close();
   });
 
@@ -185,6 +186,57 @@ describe("run status", () => {
         { jobUrl: "https://jobs.example.com/1", isMatch: true, reason: "Strong fit", error: null },
       ],
     });
+  });
+
+  it("saves a match whose first save failed", async () => {
+    const run = await createRun(new Date());
+    await prisma.run.update({ where: { id: run.id }, data: { checked: 1, failed: 1 } });
+    const result = await prisma.jobResult.create({
+      data: {
+        runId: run.id,
+        userId: carolId,
+        contextKey: "retry",
+        jobUrl: "https://jobs.example.com/retry",
+        title: "Engineer",
+        company: "Example",
+        locations: ["Pune"],
+        expMinYears: 2,
+        isMatch: true,
+        reason: "Strong fit",
+      },
+    });
+    const path = `/api/runs/${run.id}/results/${result.id}/save`;
+
+    const responses = await Promise.all([carol.post(path), carol.post(path)]);
+    for (const response of responses) {
+      expect(response.status).toBe(200);
+      expect(response.body).toMatchObject({ id: result.id, matchSaved: true });
+    }
+
+    const match = await prisma.match.findUniqueOrThrow({
+      where: { userId_jobUrl: { userId: carolId, jobUrl: "https://jobs.example.com/retry" } },
+    });
+    expect(match).toMatchObject({ locations: ["Pune"], expMinYears: 2, status: "PENDING" });
+    const updated = await prisma.run.findUniqueOrThrow({ where: { id: run.id } });
+    expect(updated.failed).toBe(0);
+    await dave.post(path).expect(404);
+  });
+
+  it("only saves results that are matches", async () => {
+    const run = await createRun(new Date());
+    const result = await prisma.jobResult.create({
+      data: {
+        runId: run.id,
+        userId: carolId,
+        contextKey: "retry",
+        jobUrl: "https://jobs.example.com/no-match",
+        title: "Engineer",
+        company: "Example",
+        isMatch: false,
+        reason: "Missing skills",
+      },
+    });
+    await carol.post(`/api/runs/${run.id}/results/${result.id}/save`).expect(409);
   });
 
   it("hides another user's run", async () => {
