@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import type { PrismaClient } from "../generated/prisma/client";
+import { Notifier } from "../matching/discord";
 import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
@@ -13,7 +14,7 @@ import { acceptsJob } from "../matching/requirements";
 import { requirementsOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
-export type RunServices = Firecrawl | PageCacheStore | MatchEvaluator;
+export type RunServices = Firecrawl | PageCacheStore | MatchEvaluator | Notifier;
 
 const query = <A>(run: () => Promise<A>) => Effect.promise(run);
 
@@ -64,6 +65,7 @@ export const processRun = (prisma: PrismaClient, runId: string) => {
       prisma.jobSource.findMany({ where: { userId, id: { in: run.sourceIds } } }),
     );
     const evaluator = yield* MatchEvaluator;
+    const notifier = yield* Notifier;
 
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
@@ -149,6 +151,18 @@ export const processRun = (prisma: PrismaClient, runId: string) => {
           }),
         ]),
       );
+
+      // A failed alert is only logged; the match is already saved.
+      if (matchSaved && settings.discordWebhookUrl) {
+        yield* notifier
+          .notifyMatch(settings.discordWebhookUrl, {
+            title: job.title,
+            company: job.company,
+            jobUrl: job.url,
+            reason: result.reason ?? "",
+          })
+          .pipe(Effect.catchTag("NotifyFailed", (error) => Effect.logWarning(error.message)));
+      }
     }
 
     yield* finish("COMPLETED");

@@ -1,6 +1,7 @@
 import { Injectable, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
 import { type Effect, Layer, ManagedRuntime } from "effect";
 import { config } from "../config";
+import { discordNotifierLayer } from "../matching/discord";
 import { matchEvaluatorLayer } from "../matching/evaluate";
 import { firecrawlLayer } from "../matching/firecrawl";
 import { pageCacheStoreLayer } from "../matching/page-cache";
@@ -17,6 +18,7 @@ export class EffectRuntime implements OnModuleInit, OnApplicationShutdown {
       Layer.mergeAll(
         firecrawlLayer(workerConfig.FIRECRAWL_API_KEY),
         pageCacheStoreLayer(prisma),
+        discordNotifierLayer,
         matchEvaluatorLayer({
           apiKey: workerConfig.OPENROUTER_API_KEY,
           model: config.OPENROUTER_MODEL,
