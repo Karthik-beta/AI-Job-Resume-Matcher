@@ -131,10 +131,11 @@ describe("process run", () => {
   });
 
   it("dedupes and filters listings, then analyses up to the run size", async () => {
-    const { run, evaluated } = await runWith(await startRun(), {
+    const { run, evaluated, alerts } = await runWith(await startRun(), {
       verdicts: { [jobUrl("1")]: "match", [jobUrl("4")]: "invalid" },
     });
 
+    expect(alerts).toEqual([]);
     expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
     expect(run).toMatchObject({
       status: "COMPLETED",

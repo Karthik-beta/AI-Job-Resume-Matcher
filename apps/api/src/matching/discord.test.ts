@@ -52,7 +52,23 @@ describe("Discord notifier", () => {
     });
     expect(outcome).toMatchObject({
       _tag: "Failure",
-      failure: { _tag: "NotifyFailed", message: "Discord request failed: Connection reset" },
+      failure: { _tag: "NotifyFailed", message: "Discord request failed (Error)." },
     });
+  });
+
+  test.each([
+    "https://example.com/api/webhooks/1/token",
+    "http://discord.com/api/webhooks/1/token",
+    "https://discord.com/channels/1",
+  ])("refuses %p without sending a request", async (url) => {
+    let sent = 0;
+    const outcome = await makeDiscordNotifier(async () => {
+      sent++;
+      return new Response(null, { status: 204 });
+    })
+      .notifyMatch(url, alert)
+      .pipe(Effect.result, Effect.runPromise);
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: "NotifyFailed" } });
+    expect(sent).toBe(0);
   });
 });

@@ -1,3 +1,4 @@
+import { isDiscordWebhookUrl } from "@job-matcher/shared";
 import { Context, Effect, Layer } from "effect";
 import { NotifyFailed } from "./errors";
 
@@ -38,25 +39,29 @@ export const matchPayload = ({ title, company, jobUrl, reason }: MatchAlert) => 
 export const makeDiscordNotifier = (post: Post) =>
   Notifier.of({
     notifyMatch: (webhookUrl, alert) =>
-      Effect.tryPromise({
-        try: () =>
-          post(webhookUrl, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(matchPayload(alert)),
-            signal: AbortSignal.timeout(timeoutMs),
-          }),
-        catch: (cause) =>
-          new NotifyFailed({
-            message: `Discord request failed: ${cause instanceof Error ? cause.message : cause}`,
-          }),
-      }).pipe(
-        Effect.flatMap((response) =>
-          response.ok
-            ? Effect.void
-            : Effect.fail(new NotifyFailed({ message: `Discord returned ${response.status}.` })),
-        ),
-      ),
+      Effect.gen(function* () {
+        if (!isDiscordWebhookUrl(webhookUrl)) {
+          return yield* new NotifyFailed({ message: "The webhook URL is not a Discord webhook." });
+        }
+        const response = yield* Effect.tryPromise({
+          try: () =>
+            post(webhookUrl, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(matchPayload(alert)),
+              signal: AbortSignal.timeout(timeoutMs),
+              redirect: "error",
+            }),
+          // Only the error name is kept: a message can include the URL, and its path holds the token.
+          catch: (cause) =>
+            new NotifyFailed({
+              message: `Discord request failed (${cause instanceof Error ? cause.name : "unknown error"}).`,
+            }),
+        });
+        if (!response.ok) {
+          return yield* new NotifyFailed({ message: `Discord returned ${response.status}.` });
+        }
+      }),
   });
 
 export const discordNotifierLayer = Layer.succeed(Notifier, makeDiscordNotifier(fetch));
