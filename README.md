@@ -94,7 +94,7 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 | `bun run db:generate` | Regenerate the Prisma client only |
 | `bun run lint` | Lint and format check with Biome |
 | `bun run typecheck` | Type-check every app |
-| `bun run test` | Unit and integration tests, with a 90% per-file line coverage threshold |
+| `bun run test` | Unit and integration tests, with per-file coverage thresholds of 90% of lines and 75% of functions |
 | `bun run test:e2e` | Playwright happy path against fake providers, in its own `<database>_e2e` database |
 | `bun run check` | All of the above (used by CI) |
 
