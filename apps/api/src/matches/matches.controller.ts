@@ -10,7 +10,7 @@ export class MatchesController {
 
   @Get()
   list(@Session() session: UserSession, @Query(new SchemaPipe(MatchesQuery)) query: MatchesQuery) {
-    return this.matches.list(session.user.id, query.status);
+    return this.matches.list(session.user.id, query.status, query.cursor);
   }
 
   @Patch(":id")

@@ -45,7 +45,11 @@ export type StartRun = typeof StartRun.Type;
 export const MatchStatus = Schema.Literals(["PENDING", "APPLIED"]);
 export type MatchStatus = typeof MatchStatus.Type;
 
-export const MatchesQuery = Schema.Struct({ status: Schema.optionalKey(MatchStatus) });
+export const MatchesQuery = Schema.Struct({
+  status: Schema.optionalKey(MatchStatus),
+  // The nextCursor from the previous page.
+  cursor: Schema.optionalKey(Schema.NonEmptyString),
+});
 export type MatchesQuery = typeof MatchesQuery.Type;
 
 export const UpdateMatch = Schema.Struct({ status: MatchStatus });
