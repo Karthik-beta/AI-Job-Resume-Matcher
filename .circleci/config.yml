@@ -26,15 +26,7 @@ commands:
           command: |
             curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
             echo 'export PATH="$HOME/.bun/bin:$PATH"' >> "$BASH_ENV"
-      - restore_cache:
-          keys:
-            - bun-v1-{{ checksum "bun.lock" }}
-            - bun-v1-
       - run: bun install --frozen-lockfile
-      - save_cache:
-          key: bun-v1-{{ checksum "bun.lock" }}
-          paths:
-            - ~/.bun/install/cache
 
 jobs:
   check:
