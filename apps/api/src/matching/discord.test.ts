@@ -14,9 +14,10 @@ const webhook = "https://discord.com/api/webhooks/1/token";
 const notify = (post: (url: string, init: RequestInit) => Promise<Response>) =>
   makeDiscordNotifier(post).notifyMatch(webhook, alert).pipe(Effect.result, Effect.runPromise);
 
-const rateLimited = (retryAfter: number | null) =>
-  new Response(retryAfter === null ? null : JSON.stringify({ retry_after: retryAfter }), {
+const rateLimited = (retryAfter: string | null) =>
+  new Response(null, {
     status: 429,
+    headers: retryAfter === null ? {} : { "retry-after": retryAfter },
   });
 
 // Replays the scripted responses in order on a test clock, so retry waits take no real time.
@@ -100,15 +101,15 @@ describe("Discord notifier", () => {
     expect(sent).toBe(0);
   });
 
-  test("retries a 429 after retry_after", async () => {
-    const { run } = scripted([() => rateLimited(1.5), () => new Response(null, { status: 204 })]);
+  test("retries a 429 after Retry-After", async () => {
+    const { run } = scripted([() => rateLimited("1.5"), () => new Response(null, { status: 204 })]);
     const { outcome, seen } = await run(["1499 millis", "1 milli"]);
     expect(seen).toEqual([1, 2]);
     expect(outcome._tag).toBe("Success");
   });
 
   test("gives up after three attempts", async () => {
-    const { run } = scripted([() => rateLimited(0.5)]);
+    const { run } = scripted([() => rateLimited("0.5")]);
     const { outcome, calls } = await run();
     expect(calls).toBe(3);
     expect(outcome).toMatchObject({
@@ -118,7 +119,7 @@ describe("Discord notifier", () => {
   });
 
   test.each([
-    ["a wait over the cap", () => rateLimited(31)],
+    ["a wait over the cap", () => rateLimited("31")],
     ["no retry hint", () => rateLimited(null)],
   ])("does not retry a 429 with %s", async (_, response) => {
     const { run } = scripted([response, () => new Response(null, { status: 204 })]);
@@ -128,7 +129,7 @@ describe("Discord notifier", () => {
       _tag: "Failure",
       failure: {
         _tag: "NotifyFailed",
-        message: "Discord returned 429 without a short enough retry_after.",
+        message: "Discord returned 429 without a short enough Retry-After.",
       },
     });
   });

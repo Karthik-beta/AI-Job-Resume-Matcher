@@ -3,7 +3,7 @@ import { Context, Duration, Effect, Layer } from "effect";
 import { NotifyFailed } from "./errors";
 
 const timeoutMs = 10_000;
-// A 429 is retried after Discord's retry_after, at most twice and only for short waits, so a
+// A 429 is retried after Discord's Retry-After, at most twice and only for short waits, so a
 // rate-limited webhook can't hold up the run for long.
 const maxAttempts = 3;
 const maxRetryWaitMs = 30_000;
@@ -42,13 +42,12 @@ export const matchPayload = ({ title, company, jobUrl, reason }: MatchAlert) => 
   allowed_mentions: { parse: [] },
 });
 
-// Discord puts the wait in seconds in the 429 body.
-const retryWaitMs = (response: Response) =>
-  Effect.promise(async () => {
-    const body = (await response.json().catch(() => null)) as { retry_after?: unknown } | null;
-    const seconds = body?.retry_after;
-    return typeof seconds === "number" && seconds >= 0 ? Math.ceil(seconds * 1000) : null;
-  });
+// Retry-After is in seconds on every API version. The body's retry_after is in milliseconds
+// before v8, and webhook URLs don't pick a version.
+const retryWaitMs = (response: Response) => {
+  const seconds = Number(response.headers.get("retry-after") ?? Number.NaN);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds * 1000) : null;
+};
 
 export const makeDiscordNotifier = (post: Post) => {
   const send = (webhookUrl: string, alert: MatchAlert) =>
@@ -80,10 +79,10 @@ export const makeDiscordNotifier = (post: Post) => {
           if (response.status !== 429 || attempt === maxAttempts) {
             return yield* new NotifyFailed({ message: `Discord returned ${response.status}.` });
           }
-          const waitMs = yield* retryWaitMs(response);
+          const waitMs = retryWaitMs(response);
           if (waitMs === null || waitMs > maxRetryWaitMs) {
             return yield* new NotifyFailed({
-              message: "Discord returned 429 without a short enough retry_after.",
+              message: "Discord returned 429 without a short enough Retry-After.",
             });
           }
           yield* Effect.sleep(Duration.millis(waitMs));
