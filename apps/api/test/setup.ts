@@ -8,8 +8,10 @@ const blockedHosts = ["firecrawl.dev", "openrouter.ai", "discord.com", "discorda
 const realFetch = globalThis.fetch;
 
 const isBlocked = (input: string | URL | Request) => {
-  const url = new URL(input instanceof Request ? input.url : input);
-  return blockedHosts.some((host) => url.hostname === host || url.hostname.endsWith(`.${host}`));
+  const raw = input instanceof Request ? input.url : String(input);
+  if (!URL.canParse(raw)) return false;
+  const hostname = new URL(raw).hostname.replace(/\.$/, "");
+  return blockedHosts.some((host) => hostname === host || hostname.endsWith(`.${host}`));
 };
 
 globalThis.fetch = Object.assign(

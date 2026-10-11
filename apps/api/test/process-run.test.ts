@@ -226,23 +226,26 @@ describe("process run", () => {
   it("alerts the webhook only for saved matches, and keeps the match when the alert fails", async () => {
     const webhookUrl = "https://discord.com/api/webhooks/1/token";
     await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: webhookUrl } });
-    await prisma.jobResult.deleteMany({ where: { userId } });
-    const verdicts = { [jobUrl("1")]: "match", [jobUrl("4")]: "match" } as const;
+    try {
+      await prisma.jobResult.deleteMany({ where: { userId } });
+      const verdicts = { [jobUrl("1")]: "match", [jobUrl("4")]: "match" } as const;
 
-    const { alerts } = await runWith(await startRun(), { verdicts });
-    expect(alerts).toEqual([
-      { webhookUrl, jobUrl: jobUrl("1") },
-      { webhookUrl, jobUrl: jobUrl("4") },
-    ]);
+      const { alerts } = await runWith(await startRun(), { verdicts });
+      expect(alerts).toEqual([
+        { webhookUrl, jobUrl: jobUrl("1") },
+        { webhookUrl, jobUrl: jobUrl("4") },
+      ]);
 
-    await prisma.jobResult.deleteMany({ where: { userId } });
-    const failing = await runWith(await startRun(), { verdicts, failAlerts: true });
-    expect(failing.run).toMatchObject({ status: "COMPLETED", failed: 0 });
-    const saved = await prisma.jobResult.count({
-      where: { runId: failing.run.id, matchSaved: true },
-    });
-    expect(saved).toBe(2);
-    await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: null } });
+      await prisma.jobResult.deleteMany({ where: { userId } });
+      const failing = await runWith(await startRun(), { verdicts, failAlerts: true });
+      expect(failing.run).toMatchObject({ status: "COMPLETED", failed: 0 });
+      const saved = await prisma.jobResult.count({
+        where: { runId: failing.run.id, matchSaved: true },
+      });
+      expect(saved).toBe(2);
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: null } });
+    }
   });
 
   it("ignores a run that is no longer queued", async () => {
