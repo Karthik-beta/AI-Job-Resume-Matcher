@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { defaultSettings } from "@job-matcher/shared";
+import { getQueueToken } from "@nestjs/bullmq";
 import type { INestApplication } from "@nestjs/common";
+import type { Queue } from "bullmq";
 import request from "supertest";
 import { signUp, startApp } from "./helpers";
 
@@ -54,5 +56,21 @@ describe("settings", () => {
       .put("/api/settings")
       .send({ ...defaultSettings, targetMinYears: 5, targetMaxYears: 2 })
       .expect(400);
+  });
+
+  it("keeps the user's job scheduler in step with the schedule", async () => {
+    const queue = app.get<Queue>(getQueueToken("runs"));
+    const session = await user.get("/api/auth/get-session").expect(200);
+    const schedulerId = `user:${session.body.user.id}`;
+
+    await user
+      .put("/api/settings")
+      .send({ ...defaultSettings, scheduleMinutes: 30 })
+      .expect(200);
+    const scheduler = await queue.getJobScheduler(schedulerId);
+    expect(scheduler).toMatchObject({ every: 1_800_000, name: "scheduled" });
+
+    await user.put("/api/settings").send(defaultSettings).expect(200);
+    expect(await queue.getJobScheduler(schedulerId)).toBeUndefined();
   });
 });
