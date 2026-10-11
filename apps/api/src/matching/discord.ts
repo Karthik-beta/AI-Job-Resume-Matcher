@@ -34,6 +34,8 @@ export const matchPayload = ({ title, company, jobUrl, reason }: MatchAlert) => 
       color: 0x5865f2,
     },
   ],
+  // The text comes from scraped pages, so it must never ping anyone.
+  allowed_mentions: { parse: [] },
 });
 
 export const makeDiscordNotifier = (post: Post) =>

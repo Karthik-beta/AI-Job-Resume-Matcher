@@ -33,6 +33,7 @@ describe("Discord notifier", () => {
               color: 0x5865f2,
             },
           ],
+          allowed_mentions: { parse: [] },
         },
       },
     ]);
