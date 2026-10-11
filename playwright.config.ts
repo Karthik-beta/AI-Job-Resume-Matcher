@@ -1,8 +1,17 @@
+import { existsSync } from "node:fs";
 import { defineConfig, devices } from "@playwright/test";
+
+// CI sets DATABASE_URL; locally it comes from .env.
+if (!process.env["DATABASE_URL"] && existsSync(".env")) process.loadEnvFile(".env");
+
+// The e2e run gets its own database next to the dev one (job_matcher_e2e), so the users,
+// sources and matches it creates never land in dev data. `migrate deploy` creates it.
+const databaseUrl = new URL(process.env["DATABASE_URL"] ?? "");
+databaseUrl.pathname += "_e2e";
 
 // The API and worker run with fake providers, so the suite never calls Firecrawl,
 // OpenRouter or Discord.
-const env = { PROVIDERS: "fake" };
+const env = { PROVIDERS: "fake", DATABASE_URL: databaseUrl.href };
 
 export default defineConfig({
   testDir: "e2e",
@@ -14,7 +23,8 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
-      command: "bun run --cwd apps/api --parallel start start:worker",
+      command:
+        "bun x --bun prisma migrate deploy && bun run --cwd apps/api --parallel start start:worker",
       url: "http://localhost:4000/api/health",
       env,
       // Never reuse a running API: a dev worker would be on live providers.

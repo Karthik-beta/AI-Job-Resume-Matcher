@@ -95,7 +95,7 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 | `bun run lint` | Lint and format check with Biome |
 | `bun run typecheck` | Type-check every app |
 | `bun run test` | Unit and integration tests, with per-file coverage thresholds of 90% of lines and 75% of functions |
-| `bun run test:e2e` | Playwright happy path against fake providers |
+| `bun run test:e2e` | Playwright happy path against fake providers, in its own `<database>_e2e` database |
 | `bun run check` | All of the above (used by CI) |
 
 `bun install` points git at `.githooks`. The pre-commit hook runs lint and typecheck, and the commit-msg hook rejects `Co-Authored-By` and "Generated with" lines. Merge commits skip the message check.
