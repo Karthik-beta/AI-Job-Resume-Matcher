@@ -77,21 +77,15 @@ jobs:
       - run: docker compose build
       - run:
           name: Start the stack
-          command: |
-            docker compose up -d --no-build
-            api=$(docker compose ps -q api)
-            for i in $(seq 1 60); do
-              status=$(docker inspect -f '{{.State.Health.Status}}' "$api")
-              [ "$status" = healthy ] && break
-              sleep 2
-            done
-            [ "$status" = healthy ] || { echo "API is $status"; exit 1; }
+          command: docker compose up -d --no-build --wait --wait-timeout 120
       - run:
           name: Check the API through the web proxy
           command: curl -fsS --retry 10 --retry-delay 2 --retry-all-errors http://localhost:8080/api/health
       - run:
-          name: Compose logs
-          command: docker compose logs --no-color
+          name: Compose status and logs
+          command: |
+            docker compose ps -a
+            docker compose logs --no-color
           when: always
 
 workflows:
