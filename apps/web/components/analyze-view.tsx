@@ -1,17 +1,15 @@
 "use client";
 
-import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { HeaderNav } from "@/components/header-nav";
+import { PastRuns } from "@/components/past-runs";
 import { RunCard } from "@/components/run-card";
+import { SignedInPage } from "@/components/signed-in-page";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
 import {
-  fetchRun,
   fetchRuns,
   fetchSettings,
   fetchSources,
@@ -19,33 +17,14 @@ import {
   type Run,
   type Source,
   startRun,
+  useRun,
 } from "@/lib/runs";
 
-const pollMs = 2_000;
-
 export function AnalyzeView() {
-  const router = useRouter();
-  const { data: session, isPending } = authClient.useSession();
-
-  useEffect(() => {
-    if (!isPending && !session) router.replace("/sign-in");
-  }, [isPending, session, router]);
-
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-5 sm:px-8">
-      <header className="flex items-center justify-between py-6">
-        <Link href="/" className="text-lg font-bold tracking-tight">
-          Job Matcher
-        </Link>
-        <nav className="flex items-center gap-1">
-          <HeaderNav />
-        </nav>
-      </header>
-      <main className="flex max-w-2xl flex-col gap-10 pt-10 pb-24 lg:pt-16">
-        <h1 className="text-4xl font-extrabold tracking-[-0.03em]">Analyze</h1>
-        {session && <Analyze />}
-      </main>
-    </div>
+    <SignedInPage title="Analyze">
+      <Analyze />
+    </SignedInPage>
   );
 }
 
@@ -53,13 +32,7 @@ function Analyze() {
   const sources = useQuery({ queryKey: ["sources"], queryFn: fetchSources });
   const settings = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const runs = useQuery({ queryKey: ["runs"], queryFn: fetchRuns });
-  const latestId = runs.data?.[0]?.id;
-  const latest = useQuery({
-    queryKey: ["runs", latestId],
-    queryFn: latestId ? () => fetchRun(latestId) : skipToken,
-    refetchInterval: (query) =>
-      query.state.data && !isActive(query.state.data.status) ? false : pollMs,
-  });
+  const latest = useRun(runs.data?.[0]?.id);
 
   if (sources.isError || settings.isError || runs.isError) {
     return <p className="text-destructive">Could not load your runs. Refresh to try again.</p>;
@@ -93,10 +66,19 @@ function Analyze() {
       {latest.isError && <p className="text-destructive">Could not load the latest run.</p>}
       {latest.data && (
         <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-bold tracking-tight">Latest run</h2>
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-2xl font-bold tracking-tight">Latest run</h2>
+            <Link
+              href={`/runs/${latest.data.id}`}
+              className="text-sm underline-offset-4 hover:underline"
+            >
+              Details
+            </Link>
+          </div>
           <RunCard run={latest.data} maxJobsPerRun={settings.data.maxJobsPerRun} />
         </section>
       )}
+      <PastRuns runs={runs.data.slice(1)} />
     </>
   );
 }
