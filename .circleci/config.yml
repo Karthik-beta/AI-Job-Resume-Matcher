@@ -1,0 +1,95 @@
+version: 2.1
+
+executors:
+  app:
+    docker:
+      - image: cimg/node:26.11
+        environment:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_matcher
+          BETTER_AUTH_SECRET: ci-only-secret-not-used-in-production
+          BETTER_AUTH_URL: http://localhost:3000
+          API_PORT: 4000
+          REDIS_URL: redis://localhost:6379
+          OPENROUTER_MODEL: nvidia/nemotron-3-super-120b-a12b:free
+      - image: postgres:17
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: job_matcher
+      - image: redis:8
+
+commands:
+  install:
+    steps:
+      - run:
+          name: Install Bun
+          command: |
+            curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
+            echo 'export PATH="$HOME/.bun/bin:$PATH"' >> "$BASH_ENV"
+      - run: bun install --frozen-lockfile
+
+jobs:
+  check:
+    executor: app
+    steps:
+      - checkout
+      - install
+      - run:
+          name: Wait for Postgres and Redis
+          command: |
+            for port in 5432 6379; do
+              timeout 60 bash -c "until nc -z localhost $port; do sleep 1; done"
+            done
+      - run: bun x --bun prisma migrate deploy
+      - run:
+          name: Install Chromium
+          command: bun x playwright install --with-deps chromium
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:e2e
+      - store_artifacts:
+          path: playwright-report
+      - store_artifacts:
+          path: test-results
+
+  # Builds both Dockerfile targets and starts deploy/compose.yml on fixtures, to catch
+  # breakage that only shows up in the images.
+  docker:
+    machine:
+      image: ubuntu-2404:current
+    environment:
+      COMPOSE_FILE: deploy/compose.yml
+      WEB_PORT: 8080
+    steps:
+      - checkout
+      - run:
+          name: Write deploy/.env
+          command: |
+            cat > deploy/.env \<<EOF
+            POSTGRES_PASSWORD=$(openssl rand -hex 32)
+            BETTER_AUTH_SECRET=$(openssl rand -hex 32)
+            BETTER_AUTH_URL=http://localhost:8080
+            API_PORT=4000
+            OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+            PROVIDERS=fake
+            EOF
+      - run: docker compose build
+      - run:
+          name: Start the stack
+          command: docker compose up -d --no-build --wait --wait-timeout 120
+      - run:
+          name: Check the API through the web proxy
+          command: curl -fsS --retry 10 --retry-delay 2 --retry-all-errors http://localhost:8080/api/health
+      - run:
+          name: Compose status and logs
+          command: |
+            docker compose ps -a
+            docker compose logs --no-color
+          when: always
+
+workflows:
+  ci:
+    jobs:
+      - check
+      - docker

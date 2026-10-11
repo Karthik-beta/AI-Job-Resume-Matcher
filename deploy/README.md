@@ -33,3 +33,5 @@ docker compose -f deploy/compose.yml up -d --build
 ```
 
 Migrations run again on every deploy; already-applied ones are skipped.
+
+CI builds both images and starts this stack with `PROVIDERS=fake` on every push (the `docker` job in `.circleci/config.yml`), so a broken image fails the PR rather than the deploy.
