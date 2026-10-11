@@ -42,6 +42,15 @@ export const StartRun = Schema.Struct({
 });
 export type StartRun = typeof StartRun.Type;
 
+export const MatchStatus = Schema.Literals(["PENDING", "APPLIED"]);
+export type MatchStatus = typeof MatchStatus.Type;
+
+export const MatchesQuery = Schema.Struct({ status: Schema.optionalKey(MatchStatus) });
+export type MatchesQuery = typeof MatchesQuery.Type;
+
+export const UpdateMatch = Schema.Struct({ status: MatchStatus });
+export type UpdateMatch = typeof UpdateMatch.Type;
+
 export const UpdateSettings = Schema.Struct({
   resumeUrl: Schema.NullOr(HttpUrl),
   discordWebhookUrl: Schema.NullOr(DiscordWebhookUrl),
