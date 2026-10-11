@@ -10,6 +10,7 @@ import type { Queue } from "bullmq";
 import { config } from "../config";
 import { PrismaService } from "../prisma/prisma.service";
 import { createRun } from "./create-run";
+import { MatchAlerts } from "./match-alerts";
 import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
 import { upsertMatch } from "./save-match";
 import { enqueueRun } from "./schedule";
@@ -20,6 +21,7 @@ const recentRuns = 20;
 export class RunsService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly alerts: MatchAlerts,
     @InjectQueue(runsQueue) private readonly queue: Queue<RunJob | ScheduledJob>,
   ) {}
 
@@ -58,7 +60,7 @@ export class RunsService {
       expMaxYears: result.expMaxYears,
       reason: result.reason ?? "",
     });
-    return this.prisma.$transaction(async (tx) => {
+    const { saved, updated } = await this.prisma.$transaction(async (tx) => {
       // Only the request that flips the flag adjusts the counter, so two quick retries count once.
       const { count } = await tx.jobResult.updateMany({
         where: { id: result.id, matchSaved: false },
@@ -67,8 +69,26 @@ export class RunsService {
       if (count === 1) {
         await tx.run.update({ where: { id: runId }, data: { failed: { decrement: 1 } } });
       }
-      return tx.jobResult.findUniqueOrThrow({ where: { id: result.id } });
+      return {
+        saved: count === 1,
+        updated: await tx.jobResult.findUniqueOrThrow({ where: { id: result.id } }),
+      };
     });
+
+    // The alert processRun would have sent, had the first save worked. Sent once, by the same
+    // request that adjusted the counter.
+    if (saved) {
+      const settings = await this.prisma.settings.findUnique({ where: { userId } });
+      if (settings?.discordWebhookUrl) {
+        await this.alerts.send(settings.discordWebhookUrl, {
+          title: result.title,
+          company: result.company,
+          jobUrl: result.jobUrl,
+          reason: result.reason ?? "",
+        });
+      }
+    }
+    return updated;
   }
 
   async start(userId: string, sourceIds: readonly string[]) {
