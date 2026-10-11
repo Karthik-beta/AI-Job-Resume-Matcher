@@ -14,12 +14,14 @@
     "db:migrate": "bun --bun prisma migrate dev",
     "db:generate": "bun --bun prisma generate",
     "test": "bun --filter '*' test",
-    "check": "bun run lint && bun run typecheck && bun run test",
+    "test:e2e": "playwright test",
+    "check": "bun run lint && bun run typecheck && bun run test && bun run test:e2e",
     "postinstall": "prisma generate",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.15",
+    "@playwright/test": "1.63.0",
     "@types/bun": "^1.4.2",
     "prisma": "^7.10.0",
     "typescript": "^6.0.3"
