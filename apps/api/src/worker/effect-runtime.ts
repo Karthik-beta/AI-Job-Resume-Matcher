@@ -1,13 +1,11 @@
 import { Injectable, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
 import { type Effect, Layer, ManagedRuntime } from "effect";
 import { config } from "../config";
-import { discordNotifierLayer } from "../matching/discord";
-import { matchEvaluatorLayer } from "../matching/evaluate";
-import { firecrawlLayer } from "../matching/firecrawl";
 import { pageCacheStoreLayer } from "../matching/page-cache";
 import { PrismaService } from "../prisma/prisma.service";
+import { fakeProvidersLayer } from "../providers/fake";
+import { liveProvidersLayer } from "../providers/live";
 import type { RunServices } from "../runs/process-run";
-import { workerConfig } from "./worker-config";
 
 @Injectable()
 export class EffectRuntime implements OnModuleInit, OnApplicationShutdown {
@@ -15,14 +13,11 @@ export class EffectRuntime implements OnModuleInit, OnApplicationShutdown {
 
   constructor(prisma: PrismaService) {
     this.runtime = ManagedRuntime.make(
-      Layer.mergeAll(
-        firecrawlLayer(workerConfig.FIRECRAWL_API_KEY),
+      Layer.merge(
         pageCacheStoreLayer(prisma),
-        discordNotifierLayer,
-        matchEvaluatorLayer({
-          apiKey: workerConfig.OPENROUTER_API_KEY,
-          model: config.OPENROUTER_MODEL,
-        }),
+        config.PROVIDERS === "fake"
+          ? fakeProvidersLayer
+          : liveProvidersLayer(config.OPENROUTER_MODEL),
       ),
     );
   }
