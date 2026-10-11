@@ -1,0 +1,59 @@
+version: 2.1
+
+executors:
+  app:
+    docker:
+      - image: cimg/node:26.11
+        environment:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_matcher
+          BETTER_AUTH_SECRET: ci-only-secret-not-used-in-production
+          BETTER_AUTH_URL: http://localhost:3000
+          API_PORT: 4000
+          REDIS_URL: redis://localhost:6379
+          OPENROUTER_MODEL: nvidia/nemotron-3-super-120b-a12b:free
+      - image: postgres:17
+        environment:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: job_matcher
+      - image: redis:8
+
+commands:
+  install:
+    steps:
+      - run:
+          name: Install Bun
+          command: |
+            curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
+            echo 'export PATH="$HOME/.bun/bin:$PATH"' >> "$BASH_ENV"
+      - run: bun install --frozen-lockfile
+
+jobs:
+  check:
+    executor: app
+    steps:
+      - checkout
+      - install
+      - run:
+          name: Wait for Postgres and Redis
+          command: |
+            for port in 5432 6379; do
+              timeout 60 bash -c "until nc -z localhost $port; do sleep 1; done"
+            done
+      - run: bun x --bun prisma migrate deploy
+      - run:
+          name: Install Chromium
+          command: bun x playwright install --with-deps chromium
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:e2e
+      - store_artifacts:
+          path: playwright-report
+      - store_artifacts:
+          path: test-results
+
+workflows:
+  ci:
+    jobs:
+      - check
