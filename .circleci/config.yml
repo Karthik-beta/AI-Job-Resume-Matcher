@@ -48,10 +48,10 @@ jobs:
             for port in 5432 6379; do
               timeout 60 bash -c "until nc -z localhost $port; do sleep 1; done"
             done
-      - run: bunx --bun prisma migrate deploy
+      - run: bun x --bun prisma migrate deploy
       - run:
           name: Install Chromium
-          command: bunx playwright install --with-deps chromium
+          command: bun x playwright install --with-deps chromium
       - run: bun run lint
       - run: bun run typecheck
       - run: bun run test
