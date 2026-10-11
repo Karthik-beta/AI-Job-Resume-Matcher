@@ -8,11 +8,11 @@ import {
 } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import { config } from "../config";
-import { contextKey } from "../matching/context-key";
 import { PrismaService } from "../prisma/prisma.service";
-import { requirementsOf } from "./run-settings";
-import { type RunJob, runsQueue } from "./runs.queue";
+import { createRun } from "./create-run";
+import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
 import { upsertMatch } from "./save-match";
+import { enqueueRun } from "./schedule";
 
 const recentRuns = 20;
 
@@ -20,7 +20,7 @@ const recentRuns = 20;
 export class RunsService {
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue(runsQueue) private readonly queue: Queue<RunJob>,
+    @InjectQueue(runsQueue) private readonly queue: Queue<RunJob | ScheduledJob>,
   ) {}
 
   list(userId: string) {
@@ -72,47 +72,23 @@ export class RunsService {
   }
 
   async start(userId: string, sourceIds: readonly string[]) {
-    const ids = [...new Set(sourceIds)];
-    const run = await this.prisma.$transaction(async (tx) => {
-      // Serialises starts per user, so two quick requests cannot both pass the active-run check.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}))`;
-
-      const settings = await tx.settings.findUnique({ where: { userId } });
-      if (!settings?.resumeUrl) {
-        throw new BadRequestException("Add a resume URL in settings before starting a run");
-      }
-      const owned = await tx.jobSource.count({ where: { userId, id: { in: ids } } });
-      if (owned !== ids.length) throw new BadRequestException("Source not found");
-
-      const active = await tx.run.findFirst({
-        where: { userId, status: { in: ["QUEUED", "RUNNING"] } },
-        select: { id: true },
-      });
-      if (active) throw new ConflictException("A run is already in progress");
-
-      return tx.run.create({
-        data: {
-          userId,
-          trigger: "MANUAL",
-          sourceIds: ids,
-          contextKey: contextKey({
-            resumeUrl: settings.resumeUrl,
-            sourceIds: ids,
-            model: config.OPENROUTER_MODEL,
-            requirements: requirementsOf(settings),
-          }),
-        },
-      });
+    const created = await createRun(this.prisma, {
+      userId,
+      sourceIds,
+      trigger: "MANUAL",
+      model: config.OPENROUTER_MODEL,
     });
+    switch (created._tag) {
+      case "NoResume":
+        throw new BadRequestException("Add a resume URL in settings before starting a run");
+      case "SourceNotFound":
+        throw new BadRequestException("Source not found");
+      case "AlreadyActive":
+        throw new ConflictException("A run is already in progress");
+    }
+    const { run } = created;
 
-    try {
-      await this.queue.add("run", { runId: run.id }, { jobId: run.id, attempts: 1 });
-    } catch {
-      // Without this the QUEUED row would block every later start with a 409.
-      await this.prisma.run.update({
-        where: { id: run.id },
-        data: { status: "FAILED", stopReason: "Could not queue the run", finishedAt: new Date() },
-      });
+    if (!(await enqueueRun(this.queue, this.prisma, run.id))) {
       throw new ServiceUnavailableException("Could not queue the run. Try again shortly.");
     }
     return run;
