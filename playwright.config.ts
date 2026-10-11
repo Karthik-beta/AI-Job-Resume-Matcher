@@ -15,14 +15,18 @@ export default defineConfig({
       command: "bun run --cwd apps/api --parallel start start:worker",
       url: "http://localhost:4000/api/health",
       env,
-      reuseExistingServer: !process.env["CI"],
+      // Never reuse a running API: a dev worker would be on live providers.
+      reuseExistingServer: false,
       timeout: 60_000,
     },
     {
-      command: "bun run --cwd apps/web dev",
+      // A production build in CI, so page compiles don't count against the test timeout.
+      command: process.env["CI"]
+        ? "bun run --cwd apps/web build && bun run --cwd apps/web start"
+        : "bun run --cwd apps/web dev",
       url: "http://localhost:3000",
       reuseExistingServer: !process.env["CI"],
-      timeout: 120_000,
+      timeout: 180_000,
     },
   ],
 });
