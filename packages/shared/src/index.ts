@@ -10,6 +10,27 @@ export const HttpUrl = Schema.Trimmed.check(
   Schema.makeFilter(isHttpUrl, { message: "Enter a valid http or https URL" }),
 );
 
+const discordHosts: ReadonlySet<string> = new Set([
+  "discord.com",
+  "discordapp.com",
+  "ptb.discord.com",
+  "canary.discord.com",
+]);
+
+export const isDiscordWebhookUrl = (value: string) => {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  return (
+    url.protocol === "https:" &&
+    discordHosts.has(url.hostname) &&
+    url.pathname.startsWith("/api/webhooks/")
+  );
+};
+
+const DiscordWebhookUrl = Schema.Trimmed.check(
+  Schema.makeFilter(isDiscordWebhookUrl, { message: "Enter a Discord webhook URL" }),
+);
+
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 
@@ -21,9 +42,18 @@ export const StartRun = Schema.Struct({
 });
 export type StartRun = typeof StartRun.Type;
 
+export const MatchStatus = Schema.Literals(["PENDING", "APPLIED"]);
+export type MatchStatus = typeof MatchStatus.Type;
+
+export const MatchesQuery = Schema.Struct({ status: Schema.optionalKey(MatchStatus) });
+export type MatchesQuery = typeof MatchesQuery.Type;
+
+export const UpdateMatch = Schema.Struct({ status: MatchStatus });
+export type UpdateMatch = typeof UpdateMatch.Type;
+
 export const UpdateSettings = Schema.Struct({
   resumeUrl: Schema.NullOr(HttpUrl),
-  discordWebhookUrl: Schema.NullOr(HttpUrl),
+  discordWebhookUrl: Schema.NullOr(DiscordWebhookUrl),
   experienceYears: NonNegativeInt,
   experienceMonths: Schema.Int.check(
     Schema.isBetween({ minimum: 0, maximum: 11 }, { message: "Months must be between 0 and 11" }),

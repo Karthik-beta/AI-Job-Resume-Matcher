@@ -13,3 +13,5 @@ apps/api/src/generated/
 .DS_Store
 
 Job Matcher Rebuild Plan.md
+test-results/
+playwright-report/

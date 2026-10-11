@@ -2,13 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { RunCard } from "@/components/run-card";
 import { SignedInPage } from "@/components/signed-in-page";
 import { buttonVariants } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { fetchSettings, useRun } from "@/lib/runs";
 
-export function RunDetailsView({ id }: { id: string }) {
+export function RunDetailsView() {
+  const { id } = useParams<{ id: string }>();
   return (
     <SignedInPage title="Run details">
       <RunDetails id={id} />

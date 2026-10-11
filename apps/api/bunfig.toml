@@ -1,4 +1,5 @@
 [test]
+preload = ["./test/setup.ts"]
 coverage = true
 # Applied to each loaded file (all of src, not only src/matching), so every module stays at
 # 90% of lines or above. src/matching/modules.test.ts loads every matching module.

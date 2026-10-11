@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import type { PrismaClient } from "../generated/prisma/client";
-import { stopsRun } from "../matching/errors";
+import { Notifier } from "../matching/discord";
+import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
 import {
@@ -11,8 +12,9 @@ import {
 } from "../matching/page-cache";
 import { acceptsJob } from "../matching/requirements";
 import { requirementsOf } from "./run-settings";
+import { type MatchFields, upsertMatch } from "./save-match";
 
-export type RunServices = Firecrawl | PageCacheStore | MatchEvaluator;
+export type RunServices = Firecrawl | PageCacheStore | MatchEvaluator | Notifier;
 
 const query = <A>(run: () => Promise<A>) => Effect.promise(run);
 
@@ -23,26 +25,14 @@ const uniqueByUrl = (listings: readonly Listing[]) => {
   return [...byUrl.values()];
 };
 
-const saveMatch = (prisma: PrismaClient, userId: string, job: Listing, reason: string) =>
-  Effect.tryPromise(() =>
-    prisma.match.upsert({
-      where: { userId_jobUrl: { userId, jobUrl: job.url } },
-      create: {
-        userId,
-        jobUrl: job.url,
-        title: job.title,
-        company: job.company,
-        locations: [...job.locations],
-        expMinYears: job.experienceMinYears,
-        expMaxYears: job.experienceMaxYears,
-        reason,
-      },
-      update: { reason, matchedAt: new Date() },
-    }),
-  ).pipe(
-    Effect.as(true),
-    Effect.orElseSucceed(() => false),
-  );
+const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
+  Effect.tryPromise({
+    try: () => upsertMatch(prisma, userId, match),
+    catch: (cause) =>
+      new SaveFailed({
+        message: `Could not save the match: ${cause instanceof Error ? cause.message : cause}`,
+      }),
+  });
 
 export const processRun = (prisma: PrismaClient, runId: string) => {
   const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
@@ -75,6 +65,7 @@ export const processRun = (prisma: PrismaClient, runId: string) => {
       prisma.jobSource.findMany({ where: { userId, id: { in: run.sourceIds } } }),
     );
     const evaluator = yield* MatchEvaluator;
+    const notifier = yield* Notifier;
 
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
@@ -126,13 +117,27 @@ export const processRun = (prisma: PrismaClient, runId: string) => {
         outcome._tag === "Success"
           ? { isMatch: outcome.success.isMatch, reason: outcome.success.reason, error: null }
           : { isMatch: null, reason: null, error: outcome.failure.message };
-      // A failed save keeps the verdict without an error, so the job is not analysed again.
-      const matchSaved = result.isMatch
-        ? yield* saveMatch(prisma, userId, job, result.reason ?? "")
-        : false;
-      const failed = result.error !== null || (result.isMatch === true && !matchSaved);
+      const listing = {
+        title: job.title,
+        company: job.company,
+        locations: [...job.locations],
+        expMinYears: job.experienceMinYears,
+        expMaxYears: job.experienceMaxYears,
+      };
+      // A failed save keeps the verdict without an error, so the job is not analysed again
+      // and the match can be saved later from the run page.
+      const saved =
+        result.isMatch === true
+          ? yield* saveMatch(prisma, userId, {
+              jobUrl: job.url,
+              ...listing,
+              reason: result.reason ?? "",
+            }).pipe(Effect.result)
+          : null;
+      const matchSaved = saved?._tag === "Success";
+      const failed = result.error !== null || saved?._tag === "Failure";
 
-      const fields = { runId, title: job.title, company: job.company, ...result, matchSaved };
+      const fields = { runId, ...listing, ...result, matchSaved };
       yield* query(() =>
         prisma.$transaction([
           prisma.jobResult.upsert({
@@ -146,6 +151,18 @@ export const processRun = (prisma: PrismaClient, runId: string) => {
           }),
         ]),
       );
+
+      // A failed alert is only logged; the match is already saved.
+      if (matchSaved && settings.discordWebhookUrl) {
+        yield* notifier
+          .notifyMatch(settings.discordWebhookUrl, {
+            title: job.title,
+            company: job.company,
+            jobUrl: job.url,
+            reason: result.reason ?? "",
+          })
+          .pipe(Effect.catchTag("NotifyFailed", (error) => Effect.logWarning(error.message)));
+      }
     }
 
     yield* finish("COMPLETED");

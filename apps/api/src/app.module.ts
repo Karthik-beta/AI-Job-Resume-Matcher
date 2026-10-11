@@ -1,6 +1,10 @@
 import { Module } from "@nestjs/common";
 import { AuthModule } from "./auth/auth.module";
+import { CacheController } from "./cache/cache.controller";
+import { CacheService } from "./cache/cache.service";
 import { HealthController } from "./health/health.controller";
+import { MatchesController } from "./matches/matches.controller";
+import { MatchesService } from "./matches/matches.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -13,7 +17,14 @@ import { SourcesService } from "./sources/sources.service";
 
 @Module({
   imports: [PrismaModule, RedisModule, AuthModule, QueueModule],
-  controllers: [HealthController, SourcesController, SettingsController, RunsController],
-  providers: [SourcesService, SettingsService, RunsService],
+  controllers: [
+    HealthController,
+    SourcesController,
+    SettingsController,
+    RunsController,
+    MatchesController,
+    CacheController,
+  ],
+  providers: [SourcesService, SettingsService, RunsService, MatchesService, CacheService],
 })
 export class AppModule {}
