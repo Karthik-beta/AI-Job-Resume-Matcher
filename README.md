@@ -90,7 +90,8 @@ If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE
 | Script | Description |
 | --- | --- |
 | `bun run dev` | Start Postgres and Redis, then the web app, API and run worker |
-| `bun run db:migrate` | Create and apply Prisma migrations |
+| `bun run db:migrate` | Create and apply Prisma migrations, then regenerate the Prisma client |
+| `bun run db:generate` | Regenerate the Prisma client only |
 | `bun run lint` | Lint and format check with Biome |
 | `bun run typecheck` | Type-check every app |
 | `bun run test` | Unit and integration tests, with a 90% per-file line coverage threshold |
