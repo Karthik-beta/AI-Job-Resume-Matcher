@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PrismaService } from "../src/prisma/prisma.service";
-import { fakeNotifier, fakeProvidersLayer } from "../src/providers/fake";
+import { fakeEvaluator, fakeNotifier, fakeProvidersLayer } from "../src/providers/fake";
 import { liveProvidersLayer } from "../src/providers/live";
 import { processRun } from "../src/runs/process-run";
 
@@ -76,5 +76,17 @@ describe("fake providers", () => {
       fakeNotifier.notifyMatch("https://example.com/hook", alert).pipe(Effect.result),
     );
     expect(refused).toMatchObject({ _tag: "Failure", failure: { _tag: "NotifyFailed" } });
+  });
+
+  it.each([
+    ["auth", "OpenRouterAuthError"],
+    ["invalid", "MatchOutputInvalid"],
+  ])("scripts a %p verdict as %s", async (verdict, tag) => {
+    const outcome = await Effect.runPromise(
+      fakeEvaluator
+        .evaluate({ resume: "resume", jobPage: `Verdict: ${verdict}` })
+        .pipe(Effect.result),
+    );
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: tag } });
   });
 });
