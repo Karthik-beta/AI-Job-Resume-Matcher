@@ -3,6 +3,7 @@ preload = ["./test/setup.ts"]
 coverage = true
 # Applied to each loaded file (all of src, not only src/matching), so every module stays at
 # 90% of lines or above. src/matching/modules.test.ts loads every matching module.
-# Functions are not enforced: Effect error classes count as uncovered constructors.
-coverageThreshold = { lines = 0.9, functions = 0 }
+# Functions are held at 75%, the most src/matching/errors.ts can reach: Bun counts a function on
+# its Data.TaggedError lines that no test can call. Every other file is at 80% or above.
+coverageThreshold = { lines = 0.9, functions = 0.75 }
 coveragePathIgnorePatterns = ["src/generated/**", "test/**"]
