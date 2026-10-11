@@ -181,6 +181,30 @@ describe("process run", () => {
     expect(run).toMatchObject({ status: "STOPPED", stopReason: "Unsupported model", found: 0 });
   });
 
+  it("keeps an applied match's status and stores the listing details", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.match.update({
+      where: { userId_jobUrl: { userId, jobUrl: jobUrl("1") } },
+      data: { status: "APPLIED" },
+    });
+    const { run } = await runWith(await startRun(), {
+      verdicts: { [jobUrl("1")]: "match" },
+    });
+
+    const match = await prisma.match.findUniqueOrThrow({
+      where: { userId_jobUrl: { userId, jobUrl: jobUrl("1") } },
+    });
+    expect(match).toMatchObject({ status: "APPLIED", reason: "Strong fit" });
+    const result = await prisma.jobResult.findFirstOrThrow({
+      where: { runId: run.id, jobUrl: jobUrl("1") },
+    });
+    expect(result).toMatchObject({
+      locations: ["Bengaluru"],
+      expMinYears: null,
+      matchSaved: true,
+    });
+  });
+
   it("ignores a run that is no longer queued", async () => {
     const runId = await startRun();
     await prisma.run.update({ where: { id: runId }, data: { status: "STOPPED" } });
