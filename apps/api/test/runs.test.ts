@@ -4,6 +4,7 @@ import { getQueueToken } from "@nestjs/bullmq";
 import type { INestApplication } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import request from "supertest";
+import { PrismaService } from "../src/prisma/prisma.service";
 import type { RunJob } from "../src/runs/runs.queue";
 import { signUp, startApp } from "./helpers";
 
@@ -102,6 +103,96 @@ describe("runs", () => {
     const statuses = responses.map(({ status }) => status).sort();
     expect(statuses).toEqual([201, 409]);
     for (const { status, body } of responses) if (status === 201) runIds.push(body.id);
+  });
+});
+
+describe("run status", () => {
+  let app: INestApplication;
+  let prisma: PrismaService;
+  let carol: Agent;
+  let dave: Agent;
+  let carolId: string;
+
+  const createRun = (createdAt: Date) =>
+    prisma.run.create({
+      data: { userId: carolId, trigger: "MANUAL", contextKey: "test", sourceIds: [], createdAt },
+    });
+
+  beforeAll(async () => {
+    app = await startApp();
+    prisma = app.get(PrismaService);
+    carol = await signUp(app.getHttpServer());
+    dave = await signUp(app.getHttpServer());
+    const session = await carol.get("/api/auth/get-session").expect(200);
+    carolId = session.body.user.id;
+  });
+
+  afterAll(async () => {
+    await prisma.run.deleteMany({ where: { userId: carolId } });
+    await app.close();
+  });
+
+  it("rejects requests without a session", async () => {
+    await request(app.getHttpServer()).get("/api/runs").expect(401);
+  });
+
+  it("lists the 20 most recent runs, newest first", async () => {
+    const runs = [];
+    for (let minute = 0; minute < 21; minute++) {
+      runs.push(await createRun(new Date(Date.UTC(2026, 0, 1, 0, minute))));
+    }
+
+    const response = await carol.get("/api/runs").expect(200);
+    const ids = response.body.map(({ id }: { id: string }) => id);
+    expect(ids).toEqual(
+      runs
+        .slice(1)
+        .reverse()
+        .map(({ id }) => id),
+    );
+  });
+
+  it("returns a run with its counts, stop reason and job results", async () => {
+    const run = await createRun(new Date());
+    await prisma.run.update({
+      where: { id: run.id },
+      data: { status: "STOPPED", stopReason: "User not found.", found: 3, eligible: 2, checked: 1 },
+    });
+    await prisma.jobResult.create({
+      data: {
+        runId: run.id,
+        userId: carolId,
+        contextKey: "test",
+        jobUrl: "https://jobs.example.com/1",
+        title: "Engineer",
+        company: "Example",
+        isMatch: true,
+        reason: "Strong fit",
+        matchSaved: true,
+      },
+    });
+
+    const response = await carol.get(`/api/runs/${run.id}`).expect(200);
+    expect(response.body).toMatchObject({
+      id: run.id,
+      status: "STOPPED",
+      stopReason: "User not found.",
+      found: 3,
+      eligible: 2,
+      checked: 1,
+      failed: 0,
+      results: [
+        { jobUrl: "https://jobs.example.com/1", isMatch: true, reason: "Strong fit", error: null },
+      ],
+    });
+  });
+
+  it("hides another user's run", async () => {
+    const run = await createRun(new Date());
+    await dave.get(`/api/runs/${run.id}`).expect(404);
+    await carol.get("/api/runs/missing").expect(404);
+    const list = await dave.get("/api/runs").expect(200);
+    expect(list.body).toEqual([]);
   });
 });
 
