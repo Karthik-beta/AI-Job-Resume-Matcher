@@ -316,4 +316,18 @@ describe("health", () => {
     const response = await request(app.getHttpServer()).get("/api/health").expect(200);
     expect(response.body).toEqual({ database: "up", redis: "up" });
   });
+
+  it("reports whether a run worker is connected", async () => {
+    // No worker runs in the tests.
+    await request(app.getHttpServer()).get("/api/health/worker").expect(503);
+
+    const queue: Queue<RunJob> = app.get(getQueueToken("runs"));
+    const getWorkers = spyOn(queue, "getWorkers").mockResolvedValue([{ name: "worker" }]);
+    try {
+      const response = await request(app.getHttpServer()).get("/api/health/worker").expect(200);
+      expect(response.body).toEqual({ worker: "up" });
+    } finally {
+      getWorkers.mockRestore();
+    }
+  });
 });

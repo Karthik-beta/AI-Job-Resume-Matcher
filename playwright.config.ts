@@ -25,7 +25,8 @@ export default defineConfig({
     {
       command:
         "bun x --bun prisma migrate deploy && bun run --cwd apps/api --parallel start start:worker",
-      url: "http://localhost:4000/api/health",
+      // Up once the worker has connected, so a run started by the test is picked up at once.
+      url: "http://localhost:4000/api/health/worker",
       env,
       // Never reuse a running API: a dev worker would be on live providers.
       reuseExistingServer: false,
