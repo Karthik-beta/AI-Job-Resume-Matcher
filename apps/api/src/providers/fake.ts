@@ -1,8 +1,10 @@
+import { isDiscordWebhookUrl } from "@job-matcher/shared";
 import { Effect, Layer, Schema } from "effect";
 import { Notifier } from "../matching/discord";
 import {
   FirecrawlBlocked,
   MatchOutputInvalid,
+  NotifyFailed,
   OpenRouterAuthError,
   ScrapeFailed,
 } from "../matching/errors";
@@ -21,6 +23,8 @@ const readFixture = (path: string) =>
 
 // `?fake-error=429` (or 401, 402) blocks Firecrawl; any other status fails just that scrape.
 const scriptedError = (url: string): Effect.Effect<void, FirecrawlBlocked | ScrapeFailed> => {
+  if (!URL.canParse(url))
+    return Effect.fail(new ScrapeFailed({ status: null, message: "Invalid URL." }));
   const status = Number(new URL(url).searchParams.get("fake-error"));
   if (!status) return Effect.void;
   const message = `Scripted Firecrawl error ${status}.`;
@@ -35,7 +39,8 @@ const pagePath = (url: string) => {
 };
 
 export const fakeFirecrawl = Firecrawl.of({
-  scrapeMarkdown: (url) => scriptedError(url).pipe(Effect.andThen(readFixture(pagePath(url)))),
+  scrapeMarkdown: (url) =>
+    scriptedError(url).pipe(Effect.andThen(Effect.suspend(() => readFixture(pagePath(url))))),
   scrapeListings: (url) =>
     scriptedError(url).pipe(
       Effect.andThen(readFixture("listings.json")),
@@ -70,7 +75,10 @@ export const fakeEvaluator = MatchEvaluator.of({
 });
 
 export const fakeNotifier = Notifier.of({
-  notifyMatch: (_, alert) => Effect.logInfo(`Fake Discord alert for ${alert.jobUrl}`),
+  notifyMatch: (webhookUrl, alert) =>
+    isDiscordWebhookUrl(webhookUrl)
+      ? Effect.logInfo(`Fake Discord alert for ${alert.jobUrl}`)
+      : Effect.fail(new NotifyFailed({ message: "The webhook URL is not a Discord webhook." })),
 });
 
 export const fakeProvidersLayer = Layer.mergeAll(

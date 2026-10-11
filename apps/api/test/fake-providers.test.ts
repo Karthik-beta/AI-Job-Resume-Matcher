@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PrismaService } from "../src/prisma/prisma.service";
-import { fakeProvidersLayer } from "../src/providers/fake";
+import { fakeNotifier, fakeProvidersLayer } from "../src/providers/fake";
+import { liveProvidersLayer } from "../src/providers/live";
 import { processRun } from "../src/runs/process-run";
 
 describe("fake providers", () => {
@@ -52,6 +53,28 @@ describe("fake providers", () => {
   });
 
   it("blocks requests to real providers", async () => {
-    expect(fetch("https://api.firecrawl.dev/v2/scrape")).rejects.toThrow("Tests must not call");
+    await expect(fetch("https://api.firecrawl.dev/v2/scrape")).rejects.toThrow(
+      "Tests must not call",
+    );
+    expect(() => liveProvidersLayer("example/model")).toThrow();
+  });
+
+  it("fakes Discord with the same URL check as the live notifier", async () => {
+    const alert = {
+      title: "Engineer",
+      company: "Example",
+      jobUrl: "https://jobs.example.com/1",
+      reason: "Fit",
+    };
+    const sent = await Effect.runPromise(
+      fakeNotifier
+        .notifyMatch("https://discord.com/api/webhooks/1/token", alert)
+        .pipe(Effect.result),
+    );
+    expect(sent._tag).toBe("Success");
+    const refused = await Effect.runPromise(
+      fakeNotifier.notifyMatch("https://example.com/hook", alert).pipe(Effect.result),
+    );
+    expect(refused).toMatchObject({ _tag: "Failure", failure: { _tag: "NotifyFailed" } });
   });
 });

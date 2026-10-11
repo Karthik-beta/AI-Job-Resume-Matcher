@@ -1,4 +1,9 @@
-// Tests must use the fake providers; any request to a real one fails loudly.
+// Tests must use the fake providers. Without keys no live layer can be built, which also
+// covers the Firecrawl SDK (it uses axios, not fetch); any fetch to a provider fails loudly.
+delete process.env["FIRECRAWL_API_KEY"];
+delete process.env["OPENROUTER_API_KEY"];
+process.env["PROVIDERS"] = "fake";
+
 const blockedHosts = ["firecrawl.dev", "openrouter.ai", "discord.com", "discordapp.com"];
 const realFetch = globalThis.fetch;
 
