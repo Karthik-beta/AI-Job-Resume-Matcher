@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect";
 import type { Listing } from "../firecrawl";
-import { boardKey, isEuSource, type SourceAdapter } from "./adapter";
+import { boardKey, type SourceAdapter } from "./adapter";
 import { fetchJson } from "./http";
 import { decodeEntities, experienceFromText, htmlToText, isoDate } from "./text";
 
@@ -48,9 +48,9 @@ export const greenhouseAdapter: SourceAdapter = {
   fetchListings: (source) =>
     Effect.gen(function* () {
       const token = yield* boardKey(source, "Greenhouse");
-      const host = isEuSource(source) ? "boards-api.eu.greenhouse.io" : "boards-api.greenhouse.io";
       const { jobs } = yield* fetchJson(
-        `https://${host}/v1/boards/${encodeURIComponent(token)}/jobs?content=true`,
+        // There is no EU Job Board API host (boards-api.eu.greenhouse.io does not resolve).
+        `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(token)}/jobs?content=true`,
         GreenhouseJobs,
         { label: "Greenhouse", notFound: `Greenhouse board '${token}' not found.` },
       );

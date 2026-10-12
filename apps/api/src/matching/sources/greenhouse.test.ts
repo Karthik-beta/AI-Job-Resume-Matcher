@@ -47,7 +47,7 @@ describe("Greenhouse adapter", () => {
       greenhouseAdapter,
       { ...source, url: "https://job-boards.eu.greenhouse.io/acme", adapterKey: "acme" },
       {
-        "https://boards-api.eu.greenhouse.io/v1/boards/acme/jobs?content=true": JSON.stringify({
+        "https://boards-api.greenhouse.io/v1/boards/acme/jobs?content=true": JSON.stringify({
           jobs: [job, bare],
         }),
       },
