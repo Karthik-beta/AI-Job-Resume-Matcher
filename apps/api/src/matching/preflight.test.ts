@@ -5,6 +5,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { MatchEvaluator, makeMatchEvaluator } from "./evaluate";
+import { defaultRouting } from "./routing";
 
 const model = "example/test-model";
 const keyUrl = "https://openrouter.ai/api/v1/key";
@@ -51,7 +52,7 @@ const preflight = async (replies: { key: Reply; endpoints?: Reply }) => {
       );
     }),
   );
-  const layer = Layer.effect(MatchEvaluator, makeMatchEvaluator(model)).pipe(
+  const layer = Layer.effect(MatchEvaluator, makeMatchEvaluator(model, defaultRouting)).pipe(
     Layer.provide(OpenRouterClient.layer({ apiKey: Redacted.make("test-key") })),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
   );

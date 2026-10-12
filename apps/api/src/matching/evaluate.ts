@@ -6,12 +6,13 @@ import {
   MatchOutputInvalid,
   type OpenRouterAuthError,
   OpenRouterRequestFailed,
-  type OpenRouterUnavailable,
+  OpenRouterUnavailable,
   openRouterErrorFromStatus,
 } from "./errors";
 import { decodeMatchOutput, type MatchResult } from "./match-output";
 import { checkAccess, type PreflightError } from "./preflight";
 import type { Requirements } from "./requirements";
+import { priceCapText, type Routing } from "./routing";
 
 export const systemPrompt =
   "You are an expert job interviewer with decades of experience. Analyze the " +
@@ -86,15 +87,28 @@ export const userPrompt = ({ resume, jobPage, requirements }: MatchInput) => {
   return `${content}Determine if this candidate is a good fit and explain why briefly.`;
 };
 
-const toEvaluateError = (error: AiError.AiError) => {
+// OpenRouter answers a request no endpoint can serve, such as one over max_price, with a 404 or 400.
+const priceCapPattern = /price|no endpoints/i;
+
+const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
   const { reason } = error;
   const status = "http" in reason ? reason.http?.response?.status : undefined;
-  return status === undefined
-    ? new OpenRouterRequestFailed({ status: null, message: error.message })
-    : openRouterErrorFromStatus(status, error.message);
+  if (status === undefined) {
+    return new OpenRouterRequestFailed({ status: null, message: error.message });
+  }
+  if ((status === 400 || status === 404) && priceCapPattern.test(error.message)) {
+    return new OpenRouterUnavailable({
+      status,
+      message: `No flex endpoint under the price cap (${priceCapText(routing)}): ${error.message}`,
+    });
+  }
+  return openRouterErrorFromStatus(status, error.message);
 };
 
-export const makeMatchEvaluator = (model: string) =>
+// Bun's fetch drops a connection that is idle for 5 minutes, and flex completions can take longer.
+export const completionRequestInit: BunFetchRequestInit = { timeout: 15 * 60 * 1000 };
+
+export const makeMatchEvaluator = (model: string, routing: Routing) =>
   Effect.gen(function* () {
     const openRouter = yield* OpenRouterClient.OpenRouterClient;
 
@@ -104,7 +118,6 @@ export const makeMatchEvaluator = (model: string) =>
         openRouter
           .createChatCompletion({
             model,
-            temperature: 0,
             stream: false,
             messages: [
               { role: "system", content: systemPrompt },
@@ -114,10 +127,29 @@ export const makeMatchEvaluator = (model: string) =>
               type: "json_schema",
               json_schema: { name: "job_match", strict: true, schema: matchJsonSchema },
             },
-            provider: { require_parameters: true },
+            service_tier: routing.serviceTier,
+            provider: {
+              only: routing.providers,
+              allow_fallbacks: false,
+              require_parameters: true,
+              max_price: {
+                prompt: String(routing.maxPrice.prompt),
+                completion: String(routing.maxPrice.completion),
+              },
+            },
+            reasoning: { effort: routing.reasoningEffort },
+            max_completion_tokens: 2000,
           })
           .pipe(
-            Effect.mapError(toEvaluateError),
+            Effect.provideService(FetchHttpClient.RequestInit, completionRequestInit),
+            Effect.mapError(toEvaluateError(routing)),
+            Effect.tap(([body]) =>
+              routing.serviceTier === "flex" && body.service_tier && body.service_tier !== "flex"
+                ? Effect.logWarning(
+                    `OpenRouter served the evaluation on the ${body.service_tier} tier, not flex.`,
+                  )
+                : Effect.void,
+            ),
             Effect.flatMap(([body]) => {
               const choice = body.choices[0];
               if (!choice) {
@@ -142,8 +174,12 @@ export const makeMatchEvaluator = (model: string) =>
     });
   });
 
-export const matchEvaluatorLayer = (options: { readonly apiKey: string; readonly model: string }) =>
-  Layer.effect(MatchEvaluator, makeMatchEvaluator(options.model)).pipe(
+export const matchEvaluatorLayer = (options: {
+  readonly apiKey: string;
+  readonly model: string;
+  readonly routing: Routing;
+}) =>
+  Layer.effect(MatchEvaluator, makeMatchEvaluator(options.model, options.routing)).pipe(
     Layer.provide(OpenRouterClient.layer({ apiKey: Redacted.make(options.apiKey) })),
     Layer.provide(FetchHttpClient.layer),
   );
