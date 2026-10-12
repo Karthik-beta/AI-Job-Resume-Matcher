@@ -24,6 +24,20 @@ const reservedRecruiteeSubdomains: ReadonlySet<string> = new Set([
   "support",
   "www",
 ]);
+const atsDomains = [
+  "greenhouse.io",
+  "lever.co",
+  "ashbyhq.com",
+  "smartrecruiters.com",
+  "recruitee.com",
+];
+
+// Hosts of the supported ATSs, where a careers page may link its job ads.
+export const isAtsHost = (hostname: string) => {
+  const host = hostname.toLowerCase();
+  return atsDomains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+};
+
 const validKey = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 const keyOf = (value: string | null | undefined) =>

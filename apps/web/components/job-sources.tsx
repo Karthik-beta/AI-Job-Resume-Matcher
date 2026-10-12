@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
 import { validate } from "@/lib/validate";
 
@@ -22,6 +23,7 @@ const Source = Schema.Struct({
   adapterKey: Schema.NullOr(Schema.String),
   suggestedKind: Schema.NullOr(SourceKind),
   suggestedAdapterKey: Schema.NullOr(Schema.String),
+  useMap: Schema.Boolean,
 });
 type Source = typeof Source.Type;
 
@@ -142,11 +144,16 @@ function SourceRow({
   const [editing, setEditing] = useState(false);
   const [kind, setKind] = useState<SourceKind>(source.kind);
   const [adapterKey, setAdapterKey] = useState(source.adapterKey ?? "");
+  const [useMap, setUseMap] = useState(source.useMap);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function update(nextKind: SourceKind, nextKey: string | null) {
-    const { value, errors } = validate(UpdateJobSource, { kind: nextKind, adapterKey: nextKey });
+  async function update(nextKind: SourceKind, nextKey: string | null, nextUseMap = useMap) {
+    const { value, errors } = validate(UpdateJobSource, {
+      kind: nextKind,
+      adapterKey: nextKey,
+      useMap: nextUseMap,
+    });
     if (!value) {
       setError(errors["adapterKey"] ?? errors["kind"] ?? "Check the source type");
       return;
@@ -161,6 +168,7 @@ function SourceRow({
         onUpdated(updated.value);
         setKind(updated.value.kind);
         setAdapterKey(updated.value.adapterKey ?? "");
+        setUseMap(updated.value.useMap);
       }
       setEditing(false);
     } catch (caught) {
@@ -185,6 +193,7 @@ function SourceRow({
             {sourceKindLabels[source.kind]}
             {source.adapterKey ? `: ${source.adapterKey}` : ""}
           </Badge>
+          {source.kind === "PAGE" && source.useMap && <Badge variant="outline">Site map</Badge>}
           <span className="truncate">{source.url}</span>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -250,6 +259,15 @@ function SourceRow({
             </div>
             {error && <FieldError>{error}</FieldError>}
           </Field>
+          {kind === "PAGE" && (
+            <Field orientation="horizontal" className="mt-3">
+              <Switch id={`map-${source.id}`} checked={useMap} onCheckedChange={setUseMap} />
+              <FieldLabel htmlFor={`map-${source.id}`}>
+                Find job links in Firecrawl's map of the site instead (1 credit; the page is still
+                read when the map has none)
+              </FieldLabel>
+            </Field>
+          )}
         </form>
       )}
     </li>

@@ -11,9 +11,11 @@ import {
 } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import { Firecrawl, Listing } from "../matching/firecrawl";
+import { ListingExtractor } from "../matching/listing-extractor";
 import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
 import { hostLimiterLayer } from "../matching/sources/http";
+import { markdownLinks } from "../matching/sources/page-links";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -45,15 +47,31 @@ const pagePath = (url: string) => {
 export const fakeFirecrawl = Firecrawl.of({
   scrapeMarkdown: (url) =>
     scriptedError(url).pipe(Effect.andThen(Effect.suspend(() => readFixture(pagePath(url))))),
-  scrapeListings: (url) =>
+  // Every careers page serves the same board, whose links the fake extractor reads.
+  scrapeListingPage: (url) =>
     scriptedError(url).pipe(
-      Effect.andThen(readFixture("listings.json")),
-      Effect.flatMap((text) => decodeListings(JSON.parse(text))),
-      Effect.map((listings) => ({ listings, rawHtml: null, links: [] })),
-      Effect.mapError((error) =>
-        error._tag === "SchemaError"
-          ? new ScrapeFailed({ status: null, message: "listings.json does not match Listing." })
-          : error,
+      Effect.andThen(readFixture("listing-page.md")),
+      Effect.map((markdown) => ({
+        markdown,
+        links: markdownLinks(markdown).map((link) => link.url),
+        rawHtml: null,
+        siteName: null,
+      })),
+    ),
+  // No map has job links, so sources that use one fall back to their page.
+  map: (url) => scriptedError(url).pipe(Effect.as([])),
+});
+
+// The listings in listings.json, which name the fixture board's job pages.
+export const fakeListingExtractor = ListingExtractor.of({
+  extract: () =>
+    Effect.tryPromise({
+      try: () => Bun.file(new URL("listings.json", fixtures)).json(),
+      catch: () => new MatchOutputInvalid({ message: "No listings.json fixture." }),
+    }).pipe(
+      Effect.flatMap(decodeListings),
+      Effect.mapError(
+        () => new MatchOutputInvalid({ message: "listings.json does not match Listing." }),
       ),
     ),
 });
@@ -111,6 +129,7 @@ export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(HttpFetch, fakeHttpFetch),
   Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
+  Layer.succeed(ListingExtractor, fakeListingExtractor),
   Layer.succeed(Notifier, fakeNotifier),
   hostLimiterLayer,
 );

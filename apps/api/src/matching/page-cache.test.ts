@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing";
 import { type Download, HttpFetch } from "./download";
 import { ScrapeFailed } from "./errors";
 import { Firecrawl, type Listing } from "./firecrawl";
+import { ListingExtractor } from "./listing-extractor";
 import {
   type CachedPage,
   jobPageFor,
@@ -14,6 +15,7 @@ import {
 } from "./page-cache";
 import { liteParseText, makePdfParser, PdfParser } from "./pdf";
 import { HostLimiter, makeHostLimiter } from "./sources/http";
+import { listingHashOf } from "./sources/page";
 
 const jobAd = new Uint8Array(
   await Bun.file(new URL("../../test/fixtures/job-ad.pdf", import.meta.url)).arrayBuffer(),
@@ -42,6 +44,9 @@ const listing: Listing = {
   postedAt: null,
 };
 
+// The listing a page source reads from its link.
+const pageListing: Listing = { ...listing, locations: [], experienceMinYears: null };
+
 const pageSource = (url: string) => ({ url, kind: "PAGE", adapterKey: null }) as const;
 
 const memoryStore = () => {
@@ -57,7 +62,7 @@ const memoryStore = () => {
   return { rows, store, id };
 };
 
-const fakeFirecrawl = (fail = false, markdown?: string) => {
+const fakeFirecrawl = (fail = false, markdown?: string, listingMarkdown = "[Engineer](/job/1)") => {
   const scraped: string[] = [];
   const firecrawl = Firecrawl.of({
     scrapeMarkdown: (url) =>
@@ -67,18 +72,29 @@ const fakeFirecrawl = (fail = false, markdown?: string) => {
           ? Effect.fail(new ScrapeFailed({ status: 500, message: "Server error" }))
           : Effect.succeed(markdown ?? `Markdown ${scraped.length}`);
       }),
-    scrapeListings: (url) =>
+    scrapeListingPage: (url) =>
       Effect.sync(() => {
         scraped.push(url);
-        return { listings: [listing], rawHtml: null, links: [] };
+        return { markdown: listingMarkdown, links: [], rawHtml: null, siteName: "Example" };
       }),
+    map: () => Effect.die("unused"),
   });
   return { scraped, firecrawl };
 };
 
-const setup = (options: { fail?: boolean; markdown?: string; respond?: Respond } = {}) => {
+const setup = (
+  options: { fail?: boolean; markdown?: string; listingMarkdown?: string; respond?: Respond } = {},
+) => {
   const memory = memoryStore();
-  const fake = fakeFirecrawl(options.fail, options.markdown);
+  const fake = fakeFirecrawl(options.fail, options.markdown, options.listingMarkdown);
+  const extractions: string[] = [];
+  const extractor = ListingExtractor.of({
+    extract: ({ url }) =>
+      Effect.sync(() => {
+        extractions.push(url);
+        return [pageListing];
+      }),
+  });
   const requests: string[] = [];
   const http = HttpFetch.of({
     request: (url, { method = "GET" } = {}) =>
@@ -93,15 +109,20 @@ const setup = (options: { fail?: boolean; markdown?: string; respond?: Respond }
   const layer = Layer.mergeAll(
     Layer.succeed(PageCacheStore, memory.store),
     Layer.succeed(Firecrawl, fake.firecrawl),
+    Layer.succeed(ListingExtractor, extractor),
     Layer.succeed(HttpFetch, http),
     Layer.succeed(PdfParser, makePdfParser(liteParseText)),
     Layer.effect(HostLimiter, makeHostLimiter(0)),
     TestClock.layer(),
   );
   const run = <A, E>(
-    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser | HostLimiter>,
+    program: Effect.Effect<
+      A,
+      E,
+      PageCacheStore | Firecrawl | ListingExtractor | HttpFetch | PdfParser | HostLimiter
+    >,
   ) => program.pipe(Effect.provide(layer), Effect.runPromise);
-  return { ...memory, ...fake, requests, run };
+  return { ...memory, ...fake, requests, extractions, run };
 };
 
 describe("page cache", () => {
@@ -128,8 +149,38 @@ describe("page cache", () => {
       yield* scrapeSourceListings("alice", pageSource(url));
       return first;
     });
-    expect(await run(program)).toEqual({ listings: [listing], embedded: null });
+    expect(await run(program)).toEqual({
+      listings: [pageListing],
+      embedded: null,
+      listingHash: listingHashOf("[Engineer](/job/1)"),
+    });
     expect(scraped).toEqual([url, url]);
+  });
+
+  test("keeps expired listings without reading them again when the page is unchanged", async () => {
+    // The link has no title, so only the model can read this page.
+    const { run, scraped, extractions } = setup({ listingMarkdown: "Engineer [Apply](/job/1)" });
+    const url = "https://example.com/jobs";
+    const program = Effect.gen(function* () {
+      const first = yield* scrapeSourceListings("alice", pageSource(url));
+      yield* TestClock.adjust("20 minutes");
+      const unchanged = { ...pageSource(url), listingHash: first.listingHash };
+      const second = yield* scrapeSourceListings("alice", unchanged);
+      yield* TestClock.adjust("20 minutes");
+      const changed = { ...pageSource(url), listingHash: "an older page" };
+      yield* scrapeSourceListings("alice", changed);
+      return [first, second];
+    });
+    const [first, second] = await run(program);
+    expect(first).toEqual({
+      listings: [pageListing],
+      embedded: null,
+      // Whitespace changes alone keep the hash.
+      listingHash: listingHashOf(" Engineer\n\t[Apply](/job/1) "),
+    });
+    expect(second).toEqual(first);
+    expect(scraped).toEqual([url, url, url]);
+    expect(extractions).toEqual([url, url]);
   });
 
   test("stores the listings expiry 15 minutes after the scrape", async () => {
@@ -165,6 +216,7 @@ describe("page cache", () => {
     expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
       listings: [listing],
       embedded: null,
+      listingHash: null,
     });
     expect(scraped).toEqual([]);
   });
@@ -177,8 +229,9 @@ describe("page cache", () => {
       expiresAt: null,
     });
     expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
-      listings: [listing],
+      listings: [pageListing],
       embedded: null,
+      listingHash: listingHashOf("[Engineer](/job/1)"),
     });
     expect(scraped).toEqual([url]);
   });

@@ -78,7 +78,8 @@ const setup = (
                 const next = pages.shift() ?? `# Resume page ${scraped.length}`;
                 return typeof next === "string" ? Effect.succeed(next) : Effect.fail(next);
               }),
-            scrapeListings: () => Effect.succeed({ listings: [], rawHtml: null, links: [] }),
+            scrapeListingPage: () => Effect.die("unused"),
+            map: () => Effect.die("unused"),
           }),
         ),
       ),

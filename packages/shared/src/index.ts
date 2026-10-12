@@ -75,6 +75,8 @@ export const UpdateJobSource = Schema.Struct({
     }),
   ),
   adapterKey: Schema.NullOr(Schema.Trim),
+  // Page sources only: read job links from Firecrawl's map of the site.
+  useMap: Schema.optionalKey(Schema.Boolean),
 }).check(
   Schema.makeFilter((source) =>
     atsKinds.has(source.kind) && !source.adapterKey

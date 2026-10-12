@@ -10,6 +10,7 @@ import {
 } from "../src/matching/errors";
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
+import { ListingExtractor } from "../src/matching/listing-extractor";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
@@ -86,13 +87,24 @@ describe("process run", () => {
           scraped.push(url);
           return `Page ${url}`;
         }),
-      scrapeListings: (url, options) =>
+      scrapeListingPage: (url, options) =>
         Effect.sync(() => {
           scraped.push(url);
           // Every page embeds a Greenhouse board, which only a first check looks for.
-          const links = options?.withPage ? ["https://job-boards.greenhouse.io/acme"] : [];
-          return { listings: listings[url] ?? [], rawHtml: null, links };
+          const embed = options?.withHtml ? ["https://job-boards.greenhouse.io/acme"] : [];
+          const jobs = (listings[url] ?? []).map((job) => job.url);
+          return {
+            markdown: `Jobs at ${url}`,
+            links: [...jobs, ...embed],
+            rawHtml: null,
+            siteName: null,
+          };
         }),
+      map: () => Effect.die("unused"),
+    });
+    // The jobs' links carry no titles, so the model reads each page.
+    const extractor = ListingExtractor.of({
+      extract: ({ url }) => Effect.succeed(listings[url] ?? []),
     });
     const evaluate = ({ jobPage, resumeHash }: MatchInput) => {
       const url = jobPage.replace("Page ", "");
@@ -111,6 +123,7 @@ describe("process run", () => {
     };
     const layer = Layer.mergeAll(
       Layer.succeed(Firecrawl, firecrawl),
+      Layer.succeed(ListingExtractor, extractor),
       Layer.succeed(
         MatchEvaluator,
         MatchEvaluator.of({ preflight: options.preflight ?? Effect.void, evaluate }),
@@ -194,6 +207,8 @@ describe("process run", () => {
 
     const sources = await prisma.jobSource.findMany({ where: { userId } });
     expect(sources.every(({ lastCheckedAt }) => lastCheckedAt !== null)).toBe(true);
+    // Page sources keep the hash of the page their listings came from.
+    expect(sources.every(({ listingHash }) => listingHash?.length === 64)).toBe(true);
   });
 
   it("skips jobs already analysed in the same context but retries failed ones", async () => {

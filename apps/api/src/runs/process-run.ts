@@ -7,6 +7,7 @@ import type { HttpFetch } from "../matching/download";
 import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
+import type { ListingExtractor } from "../matching/listing-extractor";
 import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
@@ -20,6 +21,7 @@ export type RunServices =
   | PageCacheStore
   | HttpFetch
   | HostLimiter
+  | ListingExtractor
   | PdfParser
   | ResumeSource
   | MatchEvaluator
@@ -86,7 +88,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        const { listings: found, embedded } = yield* scrapeSourceListings(userId, source);
+        const {
+          listings: found,
+          embedded,
+          listingHash,
+        } = yield* scrapeSourceListings(userId, source);
         for (const { url } of found) if (!kindByUrl.has(url)) kindByUrl.set(url, source.kind);
         listings.push(...found);
         // A page that embeds an ATS board is offered as a switch on the sources page.
@@ -96,7 +102,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
         yield* query(() =>
           prisma.jobSource.update({
             where: { id: source.id },
-            data: { lastCheckedAt: new Date(), ...suggestion },
+            data: {
+              lastCheckedAt: new Date(),
+              ...suggestion,
+              ...(listingHash ? { listingHash } : {}),
+            },
           }),
         );
       }

@@ -1,28 +1,41 @@
-import { describe, expect, test } from "bun:test";
-import { SdkError } from "@mendable/firecrawl-js";
+import { describe, expect, spyOn, test } from "bun:test";
+import { FirecrawlClient, SdkError } from "@mendable/firecrawl-js";
 import { Clock, Effect, type Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { Firecrawl, makeFirecrawl, type ScrapedPage, type ScrapeFormat } from "./firecrawl";
+import {
+  Firecrawl,
+  firecrawlLayer,
+  type MapOptions,
+  makeFirecrawl,
+  type ScrapedPage,
+  type ScrapeRequest,
+} from "./firecrawl";
 
 interface Call {
   readonly url: string;
-  readonly formats: readonly ScrapeFormat[];
+  readonly request: ScrapeRequest | MapOptions;
   readonly at: number;
 }
 
 type Reply = ScrapedPage | SdkError | Error;
 
-// Replays the scripted replies in order, repeating the last one.
+// Replays the scripted replies in order, repeating the last one. A map call replies with
+// the page's links.
 const fakeScrape = (replies: readonly Reply[]) => {
   const calls: Call[] = [];
-  const scrape = (url: string, formats: readonly ScrapeFormat[]) =>
+  const next = (url: string, request: ScrapeRequest | MapOptions) =>
     Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis;
       const reply = replies[Math.min(calls.length, replies.length - 1)];
-      calls.push({ url, formats, at });
+      calls.push({ url, request, at });
       return reply instanceof Error ? yield* Effect.fail(reply) : (reply ?? {});
     });
-  return { calls, scrape };
+  const scrape = (url: string, request: ScrapeRequest) => next(url, request);
+  const map = (url: string, options: MapOptions) =>
+    next(url, options).pipe(
+      Effect.map((page) => ({ links: (page.links ?? []).map((link) => ({ url: link })) })),
+    );
+  return { calls, scrape, map };
 };
 
 // Runs the program with a test clock and fast-forwards through every sleep.
@@ -32,7 +45,7 @@ const run = <A, E>(
 ) => {
   const fake = fakeScrape(replies);
   return Effect.gen(function* () {
-    const firecrawl = yield* makeFirecrawl(fake.scrape);
+    const firecrawl = yield* makeFirecrawl(fake);
     const fiber = yield* Effect.forkChild(Effect.exit(program(firecrawl)));
     yield* TestClock.adjust("1 hour");
     const exit = yield* Fiber.join(fiber);
@@ -62,8 +75,8 @@ describe("scrapeMarkdown", () => {
     const url = "https://example.com/resume.pdf";
     const { exit, calls } = await run([{ markdown: "Resume text" }], (f) => f.scrapeMarkdown(url));
     expect(successOf(exit)).toBe("Resume text");
-    expect(calls.map(({ url, formats }) => ({ url, formats }))).toEqual([
-      { url, formats: ["markdown"] },
+    expect(calls.map(({ url, request }) => ({ url, request }))).toEqual([
+      { url, request: { formats: ["markdown"] } },
     ]);
   });
 
@@ -78,95 +91,53 @@ describe("scrapeMarkdown", () => {
   );
 });
 
-describe("scrapeListings", () => {
-  test("sends the extraction prompt and schema", async () => {
-    const { calls } = await run([{ json: { jobs: [] } }], (f) =>
-      f.scrapeListings("https://example.com/jobs"),
-    );
-    const [format, ...others] = calls[0]?.formats ?? [];
-    expect(others).toEqual([]);
-    if (typeof format !== "object") throw new Error("Expected a JSON format");
-    expect(format.type).toBe("json");
-    expect(format.prompt).toContain("only individual job listings explicitly present");
-    expect(format.prompt).toContain("null experience bounds when unstated");
-    expect(format.prompt).toContain("Do not invent jobs");
-    expect(format.schema).toMatchObject({
-      required: ["jobs"],
-      properties: { jobs: { type: "array", items: { required: ["title", "url", "company"] } } },
-    });
-  });
+describe("scrapeListingPage", () => {
+  const url = "https://acme.com/careers";
+  const chrome = ["nav", "header", "footer", "aside", "form", "script", "style"];
 
-  test("decodes listings and fills in unstated fields", async () => {
-    const jobs = [
-      {
-        title: "Engineer",
-        url: "https://example.com/job/1",
-        company: "First",
-        locations: ["Bengaluru"],
-        experience_min_years: 3,
-        experience_max_years: 5,
-      },
-      { title: "Developer", url: "https://example.com/job/2", company: "Second" },
-    ];
-    const { exit } = await run([{ json: { jobs } }], (f) =>
-      f.scrapeListings("https://example.com/jobs"),
-    );
-    const page = successOf(exit);
-    expect(page.rawHtml).toBeNull();
-    expect(page.links).toEqual([]);
-    expect(page.listings).toEqual([
-      {
-        title: "Engineer",
-        url: "https://example.com/job/1",
-        company: "First",
-        locations: ["Bengaluru"],
-        experienceMinYears: 3,
-        experienceMaxYears: 5,
-        remote: null,
-        postedAt: null,
-      },
-      {
-        title: "Developer",
-        url: "https://example.com/job/2",
-        company: "Second",
-        locations: [],
-        experienceMinYears: null,
-        experienceMaxYears: null,
-        remote: null,
-        postedAt: null,
-      },
-    ]);
-  });
-
-  test("also returns the page HTML and links when asked", async () => {
+  test("asks for the main content's markdown and links, without page chrome", async () => {
     const reply = {
-      json: { jobs: [] },
-      rawHtml: "<html></html>",
-      links: ["https://example.com/a"],
+      markdown: "# Jobs",
+      links: ["https://acme.com/jobs/1"],
+      metadata: { title: "Careers | Acme Inc", ogSiteName: "Acme" },
     };
-    const { exit, calls } = await run([reply], (f) =>
-      f.scrapeListings("https://example.com/jobs", { withPage: true }),
-    );
+    const { exit, calls } = await run([reply], (f) => f.scrapeListingPage(url));
     expect(successOf(exit)).toEqual({
-      listings: [],
-      rawHtml: "<html></html>",
-      links: ["https://example.com/a"],
+      markdown: "# Jobs",
+      links: ["https://acme.com/jobs/1"],
+      rawHtml: null,
+      siteName: "Acme",
     });
-    expect(calls[0]?.formats.slice(1)).toEqual(["rawHtml", "links"]);
+    expect(calls[0]?.request).toEqual({
+      formats: ["markdown", "links"],
+      onlyMainContent: true,
+      excludeTags: chrome,
+    });
   });
 
-  test.each([
-    undefined,
-    null,
-    {},
-    { jobs: "invalid" },
-    { jobs: [{ title: "Missing fields" }] },
-    { jobs: [{ title: "T", url: "U", company: "C", experience_min_years: -1 }] },
-  ])("fails on invalid listings: %p", async (json) => {
-    const { exit } = await run([{ json }], (f) => f.scrapeListings("https://example.com/jobs"));
-    const error = failureOf(exit);
-    expect(error._tag).toBe("ScrapeFailed");
-    expect(error.message).toStartWith("Firecrawl returned invalid listings");
+  test("adds the HTML when asked and narrows the page to the source's selector", async () => {
+    const reply = { markdown: "# Jobs", rawHtml: "<html></html>" };
+    const { exit, calls } = await run([reply], (f) =>
+      f.scrapeListingPage(url, { withHtml: true, selector: "#openings" }),
+    );
+    expect(successOf(exit)).toMatchObject({ rawHtml: "<html></html>", links: [] });
+    expect(calls[0]?.request).toEqual({
+      formats: ["markdown", "links", "rawHtml"],
+      onlyMainContent: true,
+      excludeTags: chrome,
+      includeTags: ["#openings"],
+    });
+  });
+
+  test.each<[ScrapedPage["metadata"], string | null]>([
+    [{ title: "Careers | Acme Inc" }, "Acme Inc"],
+    [{ title: "Open roles – Globex" }, "Globex"],
+    [{ title: "Initech" }, "Initech"],
+    [{ ogSiteName: "  ", title: "" }, null],
+    [undefined, null],
+  ])("names the site from %p", async (metadata, siteName) => {
+    const { exit } = await run([{ metadata }], (f) => f.scrapeListingPage(url));
+    expect(successOf(exit)).toMatchObject({ markdown: "", siteName });
   });
 });
 
@@ -233,12 +204,78 @@ describe("errors", () => {
 
   test("maps network errors to a failed scrape with no status", async () => {
     const { exit } = await run([new Error("Connection lost")], (f) =>
-      f.scrapeListings("https://example.com/jobs"),
+      f.scrapeListingPage("https://example.com/jobs"),
     );
     expect(failureOf(exit)).toMatchObject({
       _tag: "ScrapeFailed",
       status: null,
       message: "Connection lost",
     });
+  });
+});
+
+describe("map", () => {
+  test("returns the site's links, spaced like scrapes", async () => {
+    const { exit, calls } = await run(
+      [{ markdown: "Job text", links: ["https://acme.com/jobs/1"] }],
+      (f) =>
+        Effect.all(
+          [
+            f.scrapeMarkdown("https://acme.com/a"),
+            f.map("https://acme.com", { search: "job", limit: 50 }),
+          ],
+          { concurrency: "unbounded" },
+        ),
+    );
+    expect(successOf(exit)[1]).toEqual([{ url: "https://acme.com/jobs/1" }]);
+    expect(calls[1]?.request).toEqual({ search: "job", limit: 50 });
+    expect(startTimes(calls)).toEqual([0, 6_100]);
+  });
+
+  test("maps errors like scrapes", async () => {
+    const { exit } = await run([new SdkError("Payment required", 402)], (f) =>
+      f.map("https://acme.com", { search: "job", limit: 50 }),
+    );
+    expect(failureOf(exit)).toMatchObject({ _tag: "FirecrawlBlocked", status: 402 });
+  });
+});
+
+describe("live layer", () => {
+  test("passes the request to the SDK with PDF parsing off", async () => {
+    // The overloads type the reply of a scrape with a JSON format, which this one has not.
+    const scrape = spyOn(FirecrawlClient.prototype, "scrape").mockResolvedValue({
+      markdown: "# Jobs",
+      links: [],
+    } as never);
+    try {
+      const page = await Firecrawl.use((f) =>
+        f.scrapeListingPage("https://acme.com/careers", { selector: "main" }),
+      ).pipe(Effect.provide(firecrawlLayer("test-key")), Effect.runPromise);
+      expect(page.markdown).toBe("# Jobs");
+      expect(scrape).toHaveBeenCalledWith("https://acme.com/careers", {
+        formats: ["markdown", "links"],
+        onlyMainContent: true,
+        excludeTags: ["nav", "header", "footer", "aside", "form", "script", "style"],
+        includeTags: ["main"],
+        parsers: [],
+      });
+    } finally {
+      scrape.mockRestore();
+    }
+  });
+
+  test("passes the map search and limit to the SDK", async () => {
+    const map = spyOn(FirecrawlClient.prototype, "map").mockResolvedValue({
+      links: [{ url: "https://acme.com/jobs/1", title: "Engineer" }],
+    });
+    try {
+      const links = await Firecrawl.use((f) =>
+        f.map("https://acme.com", { search: "job", limit: 200 }),
+      ).pipe(Effect.provide(firecrawlLayer("test-key")), Effect.runPromise);
+      expect(links).toEqual([{ url: "https://acme.com/jobs/1", title: "Engineer" }]);
+      expect(map).toHaveBeenCalledWith("https://acme.com", { search: "job", limit: 200 });
+    } finally {
+      map.mockRestore();
+    }
   });
 });

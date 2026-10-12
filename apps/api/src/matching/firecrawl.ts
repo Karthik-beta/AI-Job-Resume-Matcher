@@ -1,4 +1,4 @@
-import { FirecrawlClient, type JsonFormat, SdkError } from "@mendable/firecrawl-js";
+import { FirecrawlClient, SdkError } from "@mendable/firecrawl-js";
 import { Clock, Context, Duration, Effect, Layer, Ref, Schema } from "effect";
 import { FirecrawlBlocked, firecrawlErrorFromStatus, ScrapeFailed } from "./errors";
 import { retryAfterMs } from "./retry-after";
@@ -27,23 +27,48 @@ export type Listing = typeof Listing.Type;
 
 export interface ScrapedPage {
   readonly markdown?: string | undefined;
-  readonly json?: unknown;
   readonly rawHtml?: string | undefined;
   readonly links?: readonly string[] | undefined;
+  readonly metadata?:
+    | { readonly title?: string | undefined; readonly ogSiteName?: string | undefined }
+    | undefined;
 }
 
-export type ScrapeFormat = "markdown" | "rawHtml" | "links" | JsonFormat;
+export type ScrapeFormat = "markdown" | "rawHtml" | "links";
+
+export interface ScrapeRequest {
+  readonly formats: readonly ScrapeFormat[];
+  readonly onlyMainContent?: boolean;
+  readonly includeTags?: string[];
+  readonly excludeTags?: string[];
+}
 
 export type ScrapePage = (
   url: string,
-  formats: readonly ScrapeFormat[],
+  request: ScrapeRequest,
 ) => Effect.Effect<ScrapedPage, unknown>;
 
-export interface ListingsPage {
-  readonly listings: readonly Listing[];
-  // The page's HTML and links, when requested, to look for an embedded ATS board.
-  readonly rawHtml: string | null;
+export interface MappedLink {
+  readonly url: string;
+  readonly title?: string | undefined;
+}
+
+export interface MapOptions {
+  readonly search: string;
+  readonly limit: number;
+}
+
+export type MapSite = (
+  url: string,
+  options: MapOptions,
+) => Effect.Effect<{ readonly links: readonly MappedLink[] }, unknown>;
+
+export interface ListingPage {
+  readonly markdown: string;
   readonly links: readonly string[];
+  // Only when requested, to look for an embedded ATS board.
+  readonly rawHtml: string | null;
+  readonly siteName: string | null;
 }
 
 type FirecrawlError = FirecrawlBlocked | ScrapeFailed;
@@ -52,85 +77,31 @@ export class Firecrawl extends Context.Service<
   Firecrawl,
   {
     readonly scrapeMarkdown: (url: string) => Effect.Effect<string, FirecrawlError>;
-    readonly scrapeListings: (
-      sourceUrl: string,
-      options?: { readonly withPage?: boolean },
-    ) => Effect.Effect<ListingsPage, FirecrawlError>;
+    readonly scrapeListingPage: (
+      url: string,
+      options?: { readonly selector?: string | null; readonly withHtml?: boolean },
+    ) => Effect.Effect<ListingPage, FirecrawlError>;
+    // The site's URLs, ordered by relevance to the search; one credit per call.
+    readonly map: (
+      url: string,
+      options: MapOptions,
+    ) => Effect.Effect<readonly MappedLink[], FirecrawlError>;
   }
 >()("Firecrawl") {}
 
-const listingsPrompt =
-  "Extract only individual job listings explicitly present on this page. " +
-  "Copy their titles and companies and return actual job-detail URLs, " +
-  "resolving relative links against the source URL. Exclude navigation, " +
-  "search pages and company profiles. Extract locations and minimum/maximum " +
-  "years of experience only when explicitly stated for that listing. " +
-  "Use an empty locations list and null experience bounds when unstated. " +
-  "For '3+ years', use minimum 3 and maximum null. Do not invent jobs " +
-  "or infer location or experience from titles.";
+// Page chrome that holds links but no listings.
+const chromeTags = ["nav", "header", "footer", "aside", "form", "script", "style"];
 
-const yearsJsonSchema = (description: string) => ({
-  anyOf: [{ type: "number", minimum: 0 }, { type: "null" }],
-  description,
-});
-
-export const listingsJsonSchema = {
-  type: "object",
-  properties: {
-    jobs: {
-      type: "array",
-      description: "List of job postings",
-      items: {
-        type: "object",
-        properties: {
-          title: { type: "string", description: "Job title" },
-          url: { type: "string", description: "URL of the job posting" },
-          company: { type: "string", description: "Company name" },
-          locations: {
-            type: "array",
-            items: { type: "string" },
-            description: "Job locations explicitly stated in the listing; empty if unstated",
-          },
-          experience_min_years: yearsJsonSchema(
-            "Minimum required years of experience explicitly stated; null if unstated",
-          ),
-          experience_max_years: yearsJsonSchema(
-            "Maximum years of experience explicitly stated; null for open-ended or unstated requirements",
-          ),
-        },
-        required: ["title", "url", "company"],
-      },
-    },
-  },
-  required: ["jobs"],
+// "Careers | Acme" names the site after its last separator.
+const siteNameOf = (metadata: ScrapedPage["metadata"]) => {
+  const name =
+    metadata?.ogSiteName?.trim() ||
+    metadata?.title
+      ?.split(/\s[|–—-]\s/)
+      .at(-1)
+      ?.trim();
+  return name || null;
 };
-
-const listingsFormat: JsonFormat = {
-  type: "json",
-  prompt: listingsPrompt,
-  schema: listingsJsonSchema,
-};
-
-const Years = Schema.NullOr(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))).pipe(
-  Schema.withDecodingDefaultKey(Effect.succeed(null)),
-);
-
-const ListingsJson = Schema.Struct({
-  jobs: Schema.Array(
-    Schema.Struct({
-      title: Schema.String,
-      url: Schema.String,
-      company: Schema.String,
-      locations: Schema.Array(Schema.String).pipe(
-        Schema.withDecodingDefaultKey(Effect.succeed([])),
-      ),
-      experience_min_years: Years,
-      experience_max_years: Years,
-    }),
-  ),
-});
-
-const decodeListings = Schema.decodeUnknownEffect(ListingsJson);
 
 const isRateLimited = (cause: unknown): cause is SdkError =>
   cause instanceof SdkError && cause.status === 429;
@@ -143,7 +114,7 @@ const toFirecrawlError = (cause: unknown): FirecrawlError => {
   return new ScrapeFailed({ status: null, message });
 };
 
-export const makeFirecrawl = (scrape: ScrapePage) =>
+export const makeFirecrawl = (client: { readonly scrape: ScrapePage; readonly map: MapSite }) =>
   Effect.gen(function* () {
     const nextRequestAt = yield* Ref.make(0);
 
@@ -164,9 +135,9 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
         yield* Ref.update(nextRequestAt, (next) => Math.max(next, now + delay));
       });
 
-    const request = (url: string, formats: readonly ScrapeFormat[]) =>
+    const rateLimited = <A>(call: Effect.Effect<A, unknown>) =>
       waitForTurn.pipe(
-        Effect.andThen(scrape(url, formats)),
+        Effect.andThen(call),
         Effect.tapError((cause) => (isRateLimited(cause) ? backOff(cause) : Effect.void)),
         Effect.mapError(toFirecrawlError),
         Effect.retry({
@@ -175,9 +146,12 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
         }),
       );
 
+    const request = (url: string, scrapeRequest: ScrapeRequest) =>
+      rateLimited(client.scrape(url, scrapeRequest));
+
     return Firecrawl.of({
       scrapeMarkdown: (url) =>
-        request(url, ["markdown"]).pipe(
+        request(url, { formats: ["markdown"] }).pipe(
           Effect.flatMap(({ markdown }) =>
             markdown?.trim()
               ? Effect.succeed(markdown)
@@ -189,35 +163,23 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
                 ),
           ),
         ),
-      // rawHtml and links cost no extra credits.
-      scrapeListings: (sourceUrl, { withPage = false } = {}) =>
-        request(sourceUrl, withPage ? [listingsFormat, "rawHtml", "links"] : [listingsFormat]).pipe(
-          Effect.flatMap((page) =>
-            decodeListings(page.json).pipe(
-              Effect.mapError(
-                (error) =>
-                  new ScrapeFailed({
-                    status: null,
-                    message: `Firecrawl returned invalid listings: ${error.message}`,
-                  }),
-              ),
-              Effect.map(({ jobs }) => ({
-                listings: jobs.map((job) => ({
-                  title: job.title,
-                  url: job.url,
-                  company: job.company,
-                  locations: job.locations,
-                  experienceMinYears: job.experience_min_years,
-                  experienceMaxYears: job.experience_max_years,
-                  remote: null,
-                  postedAt: null,
-                })),
-                rawHtml: page.rawHtml ?? null,
-                links: page.links ?? [],
-              })),
-            ),
-          ),
+      // markdown, links and rawHtml together cost one credit.
+      scrapeListingPage: (url, { selector = null, withHtml = false } = {}) =>
+        request(url, {
+          formats: withHtml ? ["markdown", "links", "rawHtml"] : ["markdown", "links"],
+          onlyMainContent: true,
+          excludeTags: chromeTags,
+          ...(selector ? { includeTags: [selector] } : {}),
+        }).pipe(
+          Effect.map((page) => ({
+            markdown: page.markdown ?? "",
+            links: page.links ?? [],
+            rawHtml: page.rawHtml ?? null,
+            siteName: siteNameOf(page.metadata),
+          })),
         ),
+      map: (url, options) =>
+        rateLimited(client.map(url, options)).pipe(Effect.map(({ links }) => links)),
     });
   });
 
@@ -226,12 +188,15 @@ export const firecrawlLayer = (apiKey: string) => {
   const client = new FirecrawlClient({ apiKey, maxRetries: 1 });
   return Layer.effect(
     Firecrawl,
-    makeFirecrawl((url, formats) =>
-      Effect.tryPromise({
-        // A PDF comes back as base64 for one credit instead of one per page (see pdfOrMarkdown).
-        try: () => client.scrape(url, { formats: [...formats], parsers: [] }),
-        catch: (cause) => cause,
-      }),
-    ),
+    makeFirecrawl({
+      scrape: (url, request) =>
+        Effect.tryPromise({
+          // A PDF comes back as base64 for one credit instead of one per page (see pdfOrMarkdown).
+          try: () => client.scrape(url, { ...request, formats: [...request.formats], parsers: [] }),
+          catch: (cause) => cause,
+        }),
+      map: (url, options) =>
+        Effect.tryPromise({ try: () => client.map(url, { ...options }), catch: (cause) => cause }),
+    }),
   );
 };
