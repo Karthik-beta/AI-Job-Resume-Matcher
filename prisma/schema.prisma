@@ -34,17 +34,20 @@ enum SourceKind {
 }
 
 model JobSource {
-  id            String     @id @default(uuid(7))
-  userId        String
-  url           String
-  kind          SourceKind @default(PAGE)
-  adapterKey    String? // ATS board token or company slug
-  query         String? // SEARCH sources
-  selector      String?
-  maxPages      Int        @default(3)
-  listingHash   String?
-  lastCheckedAt DateTime?
-  createdAt     DateTime   @default(now())
+  id                  String      @id @default(uuid(7))
+  userId              String
+  url                 String
+  kind                SourceKind  @default(PAGE)
+  adapterKey          String? // ATS board token or company slug
+  query               String? // SEARCH sources
+  selector            String?
+  maxPages            Int         @default(3)
+  listingHash         String?
+  // An ATS board found embedded in a page source, offered to the user as a switch.
+  suggestedKind       SourceKind?
+  suggestedAdapterKey String?
+  lastCheckedAt       DateTime?
+  createdAt           DateTime    @default(now())
 
   @@unique([userId, url])
 }

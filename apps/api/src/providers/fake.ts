@@ -49,6 +49,7 @@ export const fakeFirecrawl = Firecrawl.of({
     scriptedError(url).pipe(
       Effect.andThen(readFixture("listings.json")),
       Effect.flatMap((text) => decodeListings(JSON.parse(text))),
+      Effect.map((listings) => ({ listings, rawHtml: null, links: [] })),
       Effect.mapError((error) =>
         error._tag === "SchemaError"
           ? new ScrapeFailed({ status: null, message: "listings.json does not match Listing." })

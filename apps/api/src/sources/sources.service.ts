@@ -29,7 +29,13 @@ export class SourcesService {
     const [updated] = await this.prisma.$transaction([
       this.prisma.jobSource.update({
         where: { id },
-        data: { kind, adapterKey: kind === "PAGE" ? null : adapterKey },
+        // Choosing a kind settles any embedded-board suggestion.
+        data: {
+          kind,
+          adapterKey: kind === "PAGE" ? null : adapterKey,
+          suggestedKind: null,
+          suggestedAdapterKey: null,
+        },
       }),
       // Cached listings came from the previous kind.
       this.prisma.pageCache.deleteMany({

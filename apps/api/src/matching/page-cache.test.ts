@@ -70,7 +70,7 @@ const fakeFirecrawl = (fail = false, markdown?: string) => {
     scrapeListings: (url) =>
       Effect.sync(() => {
         scraped.push(url);
-        return [listing];
+        return { listings: [listing], rawHtml: null, links: [] };
       }),
   });
   return { scraped, firecrawl };
@@ -128,7 +128,7 @@ describe("page cache", () => {
       yield* scrapeSourceListings("alice", pageSource(url));
       return first;
     });
-    expect(await run(program)).toEqual([listing]);
+    expect(await run(program)).toEqual({ listings: [listing], embedded: null });
     expect(scraped).toEqual([url, url]);
   });
 
@@ -162,7 +162,10 @@ describe("page cache", () => {
       content: [{ ...old, locations: [...old.locations] }],
       expiresAt: null,
     });
-    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual([listing]);
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
+      listings: [listing],
+      embedded: null,
+    });
     expect(scraped).toEqual([]);
   });
 
@@ -173,7 +176,10 @@ describe("page cache", () => {
       content: [{ title: "Old shape" }],
       expiresAt: null,
     });
-    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual([listing]);
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
+      listings: [listing],
+      embedded: null,
+    });
     expect(scraped).toEqual([url]);
   });
 });

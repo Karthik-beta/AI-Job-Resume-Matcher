@@ -53,8 +53,11 @@ export const fetchListings = async (
   replies: Record<string, Reply>,
 ) => {
   const { http, requests } = fakeHttp(replies);
-  const result = await adapter
-    .fetchListings(source)
-    .pipe(Effect.result, Effect.provide(atsLayer(http)), Effect.runPromise);
+  const result = await adapter.fetchListings(source).pipe(
+    Effect.map(({ listings }) => listings),
+    Effect.result,
+    Effect.provide(atsLayer(http)),
+    Effect.runPromise,
+  );
   return { result, requests };
 };

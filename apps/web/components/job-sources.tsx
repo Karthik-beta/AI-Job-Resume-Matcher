@@ -20,6 +20,8 @@ const Source = Schema.Struct({
   url: Schema.String,
   kind: SourceKind,
   adapterKey: Schema.NullOr(Schema.String),
+  suggestedKind: Schema.NullOr(SourceKind),
+  suggestedAdapterKey: Schema.NullOr(Schema.String),
 });
 type Source = typeof Source.Type;
 
@@ -143,12 +145,8 @@ function SourceRow({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function save(event: SubmitEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const { value, errors } = validate(UpdateJobSource, {
-      kind,
-      adapterKey: kind === "PAGE" ? null : adapterKey,
-    });
+  async function update(nextKind: SourceKind, nextKey: string | null) {
+    const { value, errors } = validate(UpdateJobSource, { kind: nextKind, adapterKey: nextKey });
     if (!value) {
       setError(errors["adapterKey"] ?? errors["kind"] ?? "Check the source type");
       return;
@@ -159,7 +157,11 @@ function SourceRow({
       const updated = decodeSource(
         await api(`/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(value) }),
       );
-      if (Option.isSome(updated)) onUpdated(updated.value);
+      if (Option.isSome(updated)) {
+        onUpdated(updated.value);
+        setKind(updated.value.kind);
+        setAdapterKey(updated.value.adapterKey ?? "");
+      }
       setEditing(false);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not update the source.");
@@ -167,6 +169,13 @@ function SourceRow({
       setPending(false);
     }
   }
+
+  function save(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    return update(kind, kind === "PAGE" ? null : adapterKey);
+  }
+
+  const { suggestedKind, suggestedAdapterKey } = source;
 
   return (
     <li className="flex flex-col gap-2 py-3">
@@ -187,6 +196,22 @@ function SourceRow({
           </Button>
         </div>
       </div>
+      {suggestedKind && suggestedAdapterKey && source.kind === "PAGE" && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-sm">
+          <span>
+            This page embeds a {sourceKindLabels[suggestedKind]} board. Reading its API is faster
+            and costs no Firecrawl credits.
+          </span>
+          <Button
+            size="sm"
+            disabled={pending}
+            onClick={() => update(suggestedKind, suggestedAdapterKey)}
+          >
+            Switch to {sourceKindLabels[suggestedKind]}
+          </Button>
+        </div>
+      )}
+      {!editing && error && <p className="text-sm text-destructive">{error}</p>}
       {editing && (
         <form onSubmit={save}>
           <Field data-invalid={error !== null}>

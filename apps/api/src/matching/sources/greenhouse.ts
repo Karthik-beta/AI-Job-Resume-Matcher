@@ -54,6 +54,6 @@ export const greenhouseAdapter: SourceAdapter = {
         GreenhouseJobs,
         { label: "Greenhouse", notFound: `Greenhouse board '${token}' not found.` },
       );
-      return jobs.map((job) => toListing(job, token));
+      return { listings: jobs.map((job) => toListing(job, token)) };
     }),
 };

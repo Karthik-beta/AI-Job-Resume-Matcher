@@ -6,7 +6,7 @@ import { Firecrawl, makeFirecrawl, type ScrapedPage, type ScrapeFormat } from ".
 
 interface Call {
   readonly url: string;
-  readonly format: ScrapeFormat;
+  readonly formats: readonly ScrapeFormat[];
   readonly at: number;
 }
 
@@ -15,11 +15,11 @@ type Reply = ScrapedPage | SdkError | Error;
 // Replays the scripted replies in order, repeating the last one.
 const fakeScrape = (replies: readonly Reply[]) => {
   const calls: Call[] = [];
-  const scrape = (url: string, format: ScrapeFormat) =>
+  const scrape = (url: string, formats: readonly ScrapeFormat[]) =>
     Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis;
       const reply = replies[Math.min(calls.length, replies.length - 1)];
-      calls.push({ url, format, at });
+      calls.push({ url, formats, at });
       return reply instanceof Error ? yield* Effect.fail(reply) : (reply ?? {});
     });
   return { calls, scrape };
@@ -62,8 +62,8 @@ describe("scrapeMarkdown", () => {
     const url = "https://example.com/resume.pdf";
     const { exit, calls } = await run([{ markdown: "Resume text" }], (f) => f.scrapeMarkdown(url));
     expect(successOf(exit)).toBe("Resume text");
-    expect(calls.map(({ url, format }) => ({ url, format }))).toEqual([
-      { url, format: "markdown" },
+    expect(calls.map(({ url, formats }) => ({ url, formats }))).toEqual([
+      { url, formats: ["markdown"] },
     ]);
   });
 
@@ -83,7 +83,8 @@ describe("scrapeListings", () => {
     const { calls } = await run([{ json: { jobs: [] } }], (f) =>
       f.scrapeListings("https://example.com/jobs"),
     );
-    const format = calls[0]?.format;
+    const [format, ...others] = calls[0]?.formats ?? [];
+    expect(others).toEqual([]);
     if (typeof format !== "object") throw new Error("Expected a JSON format");
     expect(format.type).toBe("json");
     expect(format.prompt).toContain("only individual job listings explicitly present");
@@ -110,7 +111,10 @@ describe("scrapeListings", () => {
     const { exit } = await run([{ json: { jobs } }], (f) =>
       f.scrapeListings("https://example.com/jobs"),
     );
-    expect(successOf(exit)).toEqual([
+    const page = successOf(exit);
+    expect(page.rawHtml).toBeNull();
+    expect(page.links).toEqual([]);
+    expect(page.listings).toEqual([
       {
         title: "Engineer",
         url: "https://example.com/job/1",
@@ -132,6 +136,23 @@ describe("scrapeListings", () => {
         postedAt: null,
       },
     ]);
+  });
+
+  test("also returns the page HTML and links when asked", async () => {
+    const reply = {
+      json: { jobs: [] },
+      rawHtml: "<html></html>",
+      links: ["https://example.com/a"],
+    };
+    const { exit, calls } = await run([reply], (f) =>
+      f.scrapeListings("https://example.com/jobs", { withPage: true }),
+    );
+    expect(successOf(exit)).toEqual({
+      listings: [],
+      rawHtml: "<html></html>",
+      links: ["https://example.com/a"],
+    });
+    expect(calls[0]?.formats.slice(1)).toEqual(["rawHtml", "links"]);
   });
 
   test.each([

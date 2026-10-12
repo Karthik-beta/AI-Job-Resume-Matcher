@@ -86,13 +86,17 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        const found = yield* scrapeSourceListings(userId, source);
+        const { listings: found, embedded } = yield* scrapeSourceListings(userId, source);
         for (const { url } of found) if (!kindByUrl.has(url)) kindByUrl.set(url, source.kind);
         listings.push(...found);
+        // A page that embeds an ATS board is offered as a switch on the sources page.
+        const suggestion = embedded
+          ? { suggestedKind: embedded.kind, suggestedAdapterKey: embedded.adapterKey }
+          : {};
         yield* query(() =>
           prisma.jobSource.update({
             where: { id: source.id },
-            data: { lastCheckedAt: new Date() },
+            data: { lastCheckedAt: new Date(), ...suggestion },
           }),
         );
       }

@@ -62,6 +62,7 @@ export const ashbyAdapter: SourceAdapter = {
         AshbyBoard,
         { label: "Ashby", notFound: `Ashby board '${board}' not found.` },
       );
-      return jobs.filter((job) => job.isListed !== false).map((job) => toListing(job, board));
+      const listed = jobs.filter((job) => job.isListed !== false);
+      return { listings: listed.map((job) => toListing(job, board)) };
     }),
 };

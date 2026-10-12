@@ -71,7 +71,7 @@ const setup = (responses: (Download | ScrapeFailed)[]) => {
                 scraped.push(url);
                 return `# Resume page ${scraped.length}`;
               }),
-            scrapeListings: () => Effect.succeed([]),
+            scrapeListings: () => Effect.succeed({ listings: [], rawHtml: null, links: [] }),
           }),
         ),
       ),

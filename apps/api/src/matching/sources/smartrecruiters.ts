@@ -116,7 +116,7 @@ export const smartRecruitersAdapter: SourceAdapter = {
         postings.push(...content);
         if (content.length === 0 || offset + content.length >= totalFound) break;
       }
-      return postings.map((posting) => toListing(posting, company));
+      return { listings: postings.map((posting) => toListing(posting, company)) };
     }),
   fetchDescription,
 };

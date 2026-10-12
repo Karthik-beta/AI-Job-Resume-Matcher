@@ -61,6 +61,6 @@ export const recruiteeAdapter: SourceAdapter = {
         RecruiteeOffers,
         { label: "Recruitee", notFound: `Recruitee company '${company}' not found.` },
       );
-      return offers.map((offer) => toListing(offer, company));
+      return { listings: offers.map((offer) => toListing(offer, company)) };
     }),
 };

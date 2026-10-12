@@ -86,10 +86,12 @@ describe("process run", () => {
           scraped.push(url);
           return `Page ${url}`;
         }),
-      scrapeListings: (url) =>
+      scrapeListings: (url, options) =>
         Effect.sync(() => {
           scraped.push(url);
-          return listings[url] ?? [];
+          // Every page embeds a Greenhouse board, which only a first check looks for.
+          const links = options?.withPage ? ["https://job-boards.greenhouse.io/acme"] : [];
+          return { listings: listings[url] ?? [], rawHtml: null, links };
         }),
     });
     const evaluate = ({ jobPage, resumeHash }: MatchInput) => {
@@ -299,6 +301,7 @@ describe("process run", () => {
 
   it("evaluates a listing's own description without scraping its page", async () => {
     const source = await prisma.jobSource.create({ data: { userId, url: sourceC } });
+    expect(source.lastCheckedAt).toBeNull();
     const run = await prisma.run.create({
       data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
     });
@@ -309,6 +312,9 @@ describe("process run", () => {
       "# Described\n\nExample · Bengaluru\n\nRemote\n\nBuild payment APIs.",
     ]);
     expect(finished).toMatchObject({ status: "COMPLETED", checked: 1, failed: 0 });
+    // The first check of a page source records the board it embeds.
+    const checked = await prisma.jobSource.findUniqueOrThrow({ where: { id: source.id } });
+    expect(checked).toMatchObject({ suggestedKind: "GREENHOUSE", suggestedAdapterKey: "acme" });
   });
 
   it("ignores a run that is no longer queued", async () => {

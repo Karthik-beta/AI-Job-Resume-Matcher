@@ -5,6 +5,7 @@ import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
 import { type ListingSource, listingPage } from "./sources/adapter";
+import type { DetectedSource } from "./sources/detect";
 import { adapterFor } from "./sources/registry";
 
 const listingsTtl = Duration.minutes(15);
@@ -109,13 +110,25 @@ export const scrapeJobPage = (userId: string, url: string) =>
   cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, fetchJobPage(url));
 
 // Keyed by the source URL; changing a source's kind clears its row (see SourcesService.update).
+// Only the listings are cached; an embedded board is reported by the scrape that found it.
 export const scrapeSourceListings = (userId: string, source: ListingSource) =>
-  cached(
-    { userId, url: source.url, kind: "SOURCE_LISTING" },
-    decodeListings,
-    listingsTtl,
-    adapterFor(source.kind).fetchListings(source),
-  );
+  Effect.gen(function* () {
+    const found: { embedded: DetectedSource | null } = { embedded: null };
+    const listings = yield* cached(
+      { userId, url: source.url, kind: "SOURCE_LISTING" },
+      decodeListings,
+      listingsTtl,
+      adapterFor(source.kind)
+        .fetchListings(source)
+        .pipe(
+          Effect.map((fetched) => {
+            found.embedded = fetched.embedded ?? null;
+            return fetched.listings;
+          }),
+        ),
+    );
+    return { listings, embedded: found.embedded };
+  });
 
 const withDescription = (listing: Listing, description: string) =>
   listingPage({ ...listing, description });

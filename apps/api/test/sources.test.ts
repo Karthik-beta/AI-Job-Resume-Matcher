@@ -68,11 +68,20 @@ describe("job sources", () => {
       await prisma.pageCache.create({
         data: { userId: source.userId, url, kind: "SOURCE_LISTING", content: [] },
       });
+      await prisma.jobSource.update({
+        where: { id: source.id },
+        data: { suggestedKind: "LEVER", suggestedAdapterKey: "acme" },
+      });
       const updated = await alice
         .patch(`/api/sources/${source.id}`)
         .send({ kind: "LEVER", adapterKey: " acme " })
         .expect(200);
-      expect(updated.body).toMatchObject({ kind: "LEVER", adapterKey: "acme" });
+      expect(updated.body).toMatchObject({
+        kind: "LEVER",
+        adapterKey: "acme",
+        suggestedKind: null,
+        suggestedAdapterKey: null,
+      });
       expect(await prisma.pageCache.count({ where: { userId: source.userId, url } })).toBe(0);
 
       const reverted = await alice

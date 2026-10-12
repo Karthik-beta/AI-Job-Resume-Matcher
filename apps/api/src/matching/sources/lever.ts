@@ -71,6 +71,6 @@ export const leverAdapter: SourceAdapter = {
         LeverPostings,
         { label: "Lever", notFound: `Lever board '${company}' not found.` },
       );
-      return postings.map((posting) => toListing(posting, company));
+      return { listings: postings.map((posting) => toListing(posting, company)) };
     }),
 };
