@@ -16,6 +16,11 @@ export const Listing = Schema.Struct({
   locations: Schema.Array(Schema.String),
   experienceMinYears: Schema.NullOr(Schema.Number),
   experienceMaxYears: Schema.NullOr(Schema.Number),
+  // The defaults keep listings cached before these fields existed readable.
+  remote: Schema.NullOr(Schema.Boolean).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  postedAt: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+  // The job ad's text, when the source returns it with the listing.
+  description: Schema.optionalKey(Schema.String),
 });
 
 export type Listing = typeof Listing.Type;
@@ -192,6 +197,8 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
               locations: job.locations,
               experienceMinYears: job.experience_min_years,
               experienceMaxYears: job.experience_max_years,
+              remote: null,
+              postedAt: null,
             })),
           ),
         ),

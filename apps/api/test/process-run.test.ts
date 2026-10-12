@@ -24,6 +24,8 @@ const listing = (url: string, locations: string[] = [], title = `Job ${url}`): L
   locations,
   experienceMinYears: null,
   experienceMaxYears: null,
+  remote: null,
+  postedAt: null,
 });
 
 const sourceA = "https://board.example.com/a";

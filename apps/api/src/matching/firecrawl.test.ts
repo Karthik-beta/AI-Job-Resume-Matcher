@@ -118,6 +118,8 @@ describe("scrapeListings", () => {
         locations: ["Bengaluru"],
         experienceMinYears: 3,
         experienceMaxYears: 5,
+        remote: null,
+        postedAt: null,
       },
       {
         title: "Developer",
@@ -126,6 +128,8 @@ describe("scrapeListings", () => {
         locations: [],
         experienceMinYears: null,
         experienceMaxYears: null,
+        remote: null,
+        postedAt: null,
       },
     ]);
   });

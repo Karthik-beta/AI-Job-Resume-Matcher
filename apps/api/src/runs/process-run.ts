@@ -81,7 +81,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        listings.push(...(yield* scrapeSourceListings(userId, source.url)));
+        listings.push(...(yield* scrapeSourceListings(userId, source)));
         yield* query(() =>
           prisma.jobSource.update({
             where: { id: source.id },

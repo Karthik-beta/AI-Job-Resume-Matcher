@@ -36,7 +36,11 @@ const listing: Listing = {
   locations: ["Bengaluru"],
   experienceMinYears: 3,
   experienceMaxYears: null,
+  remote: null,
+  postedAt: null,
 };
+
+const pageSource = (url: string) => ({ url, kind: "PAGE", adapterKey: null }) as const;
 
 const memoryStore = () => {
   const rows = new Map<string, CachedPage>();
@@ -114,11 +118,11 @@ describe("page cache", () => {
     const { run, scraped } = setup();
     const url = "https://example.com/jobs";
     const program = Effect.gen(function* () {
-      const first = yield* scrapeSourceListings("alice", url);
+      const first = yield* scrapeSourceListings("alice", pageSource(url));
       yield* TestClock.adjust("14 minutes");
-      yield* scrapeSourceListings("alice", url);
+      yield* scrapeSourceListings("alice", pageSource(url));
       yield* TestClock.adjust("1 minute");
-      yield* scrapeSourceListings("alice", url);
+      yield* scrapeSourceListings("alice", pageSource(url));
       return first;
     });
     expect(await run(program)).toEqual([listing]);
@@ -128,7 +132,7 @@ describe("page cache", () => {
   test("stores the listings expiry 15 minutes after the scrape", async () => {
     const { run, rows, id } = setup();
     const url = "https://example.com/jobs";
-    await run(scrapeSourceListings("alice", url));
+    await run(scrapeSourceListings("alice", pageSource(url)));
     const row = rows.get(id({ userId: "alice", url, kind: "SOURCE_LISTING" }));
     expect(row?.expiresAt?.getTime()).toBe(15 * 60 * 1000);
   });
@@ -147,6 +151,18 @@ describe("page cache", () => {
     expect(rows.size).toBe(0);
   });
 
+  test("reads listings cached before remote and postedAt existed", async () => {
+    const { run, rows, id, scraped } = setup();
+    const url = "https://example.com/jobs";
+    const { remote: _remote, postedAt: _postedAt, ...old } = listing;
+    rows.set(id({ userId: "alice", url, kind: "SOURCE_LISTING" }), {
+      content: [{ ...old, locations: [...old.locations] }],
+      expiresAt: null,
+    });
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual([listing]);
+    expect(scraped).toEqual([]);
+  });
+
   test("scrapes again when a cached row cannot be read", async () => {
     const { run, rows, id, scraped } = setup();
     const url = "https://example.com/jobs";
@@ -154,7 +170,7 @@ describe("page cache", () => {
       content: [{ title: "Old shape" }],
       expiresAt: null,
     });
-    expect(await run(scrapeSourceListings("alice", url))).toEqual([listing]);
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual([listing]);
     expect(scraped).toEqual([url]);
   });
 });

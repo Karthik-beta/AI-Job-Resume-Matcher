@@ -23,12 +23,28 @@ model Settings {
   scheduleMinutes   Int? // null = no scheduled checks
 }
 
+enum SourceKind {
+  GREENHOUSE
+  LEVER
+  ASHBY
+  SMARTRECRUITERS
+  RECRUITEE
+  SEARCH
+  PAGE
+}
+
 model JobSource {
-  id            String    @id @default(uuid(7))
+  id            String     @id @default(uuid(7))
   userId        String
   url           String
+  kind          SourceKind @default(PAGE)
+  adapterKey    String? // ATS board token or company slug
+  query         String? // SEARCH sources
+  selector      String?
+  maxPages      Int        @default(3)
+  listingHash   String?
   lastCheckedAt DateTime?
-  createdAt     DateTime  @default(now())
+  createdAt     DateTime   @default(now())
 
   @@unique([userId, url])
 }

@@ -3,6 +3,8 @@ import type { CacheKind, Prisma, PrismaClient } from "../generated/prisma/client
 import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
+import type { ListingSource } from "./sources/adapter";
+import { adapterFor } from "./sources/registry";
 
 const listingsTtl = Duration.minutes(15);
 
@@ -105,13 +107,11 @@ const fetchJobPage = (url: string) =>
 export const scrapeJobPage = (userId: string, url: string) =>
   cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, fetchJobPage(url));
 
-export const scrapeSourceListings = (userId: string, url: string) =>
-  Effect.gen(function* () {
-    const firecrawl = yield* Firecrawl;
-    return yield* cached(
-      { userId, url, kind: "SOURCE_LISTING" },
-      decodeListings,
-      listingsTtl,
-      firecrawl.scrapeListings(url),
-    );
-  });
+// Keyed by the source URL; changing a source's kind clears its row (see SourcesService.update).
+export const scrapeSourceListings = (userId: string, source: ListingSource) =>
+  cached(
+    { userId, url: source.url, kind: "SOURCE_LISTING" },
+    decodeListings,
+    listingsTtl,
+    adapterFor(source.kind).fetchListings(source),
+  );
