@@ -18,36 +18,54 @@ export class ScrapeRouteStore extends Context.Service<
   }
 >()("ScrapeRouteStore") {}
 
+// Routing memory is best-effort: a database error is logged and the page is routed as if
+// the site had no history, instead of failing the run.
+const bestEffort = <A>(action: string, fallback: A, query: () => Promise<A>) =>
+  Effect.tryPromise({ try: query, catch: (cause) => cause }).pipe(
+    Effect.catch((cause) =>
+      Effect.logWarning(
+        `Could not ${action} the scrape route: ${cause instanceof Error ? cause.message : String(cause)}`,
+      ).pipe(Effect.as(fallback)),
+    ),
+  );
+
 export const prismaScrapeRouteStore = (prisma: PrismaClient) =>
   ScrapeRouteStore.of({
     get: (domain) =>
-      Effect.promise(() =>
+      bestEffort("read", null, () =>
         prisma.scrapeRoute.findUnique({
           where: { domain },
           select: { localBlocks: true, preferCloudUntil: true },
         }),
       ),
+    // 0 when the count could not be saved, so a failed write never prefers the cloud.
     addLocalBlock: (domain) =>
-      Effect.promise(() =>
-        prisma.scrapeRoute.upsert({
-          where: { domain },
-          create: { domain, localBlocks: 1 },
-          update: { localBlocks: { increment: 1 } },
-          select: { localBlocks: true },
-        }),
-      ).pipe(Effect.map(({ localBlocks }) => localBlocks)),
+      bestEffort("count a local block on", 0, () =>
+        prisma.scrapeRoute
+          .upsert({
+            where: { domain },
+            create: { domain, localBlocks: 1 },
+            update: { localBlocks: { increment: 1 } },
+            select: { localBlocks: true },
+          })
+          .then(({ localBlocks }) => localBlocks),
+      ),
     preferCloud: (domain, until) =>
-      Effect.promise(() =>
-        prisma.scrapeRoute.update({ where: { domain }, data: { preferCloudUntil: until } }),
-      ).pipe(Effect.asVoid),
+      bestEffort("save", undefined, () =>
+        prisma.scrapeRoute
+          .update({ where: { domain }, data: { preferCloudUntil: until } })
+          .then(() => undefined),
+      ),
     // Most sites never block, so a success writes only when there is a count to reset.
     localWorked: (domain) =>
-      Effect.promise(() =>
-        prisma.scrapeRoute.updateMany({
-          where: { domain, localBlocks: { gt: 0 } },
-          data: { localBlocks: 0, preferCloudUntil: null },
-        }),
-      ).pipe(Effect.asVoid),
+      bestEffort("reset", undefined, () =>
+        prisma.scrapeRoute
+          .updateMany({
+            where: { domain, localBlocks: { gt: 0 } },
+            data: { localBlocks: 0, preferCloudUntil: null },
+          })
+          .then(() => undefined),
+      ),
   });
 
 export const scrapeRouteStoreLayer = (prisma: PrismaClient) =>

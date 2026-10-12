@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
-import type { ScrapeBackend, ScrapedPage } from "./firecrawl";
+import type { PrismaClient } from "../generated/prisma/client";
+import { FirecrawlRequestFailed, type ScrapeBackend, type ScrapedPage } from "./firecrawl";
 import { makeScrapeRouter } from "./scrape-router";
-import { memoryScrapeRouteStore, noteLocalBlock, prefersCloud } from "./scrape-routes";
+import {
+  memoryScrapeRouteStore,
+  noteLocalBlock,
+  prefersCloud,
+  prismaScrapeRouteStore,
+} from "./scrape-routes";
 
 const domain = "careers.acme.com";
 const url = `https://${domain}/jobs/1`;
@@ -49,6 +55,23 @@ describe("route policy", () => {
     ));
 });
 
+describe("prismaScrapeRouteStore", () => {
+  test("carries on without routing memory when the database fails", () =>
+    runTest(
+      Effect.gen(function* () {
+        const down = () => Promise.reject(new Error("Connection refused"));
+        const scrapeRoute = { findUnique: down, upsert: down, update: down, updateMany: down };
+        const store = prismaScrapeRouteStore({ scrapeRoute } as unknown as PrismaClient);
+        expect(yield* store.get(domain)).toBeNull();
+        expect(yield* store.addLocalBlock(domain)).toBe(0);
+        yield* noteLocalBlock(store, domain);
+        expect(yield* prefersCloud(store, domain)).toBe(false);
+        yield* store.preferCloud(domain, new Date(0));
+        yield* store.localWorked(domain);
+      }),
+    ));
+});
+
 describe("hybrid routing by domain", () => {
   test("skips the local instance for a site that keeps blocking it, then tries it again", () =>
     runTest(
@@ -86,6 +109,63 @@ describe("hybrid routing by domain", () => {
         localReply = jobPage;
         expect(yield* scrape).toEqual({ via: "local", calls: ["local"] });
         expect(routes.get(domain)).toEqual({ localBlocks: 0, preferCloudUntil: null });
+      }),
+    ));
+
+  const hybridRouter = (localReply: ScrapedPage | FirecrawlRequestFailed) => {
+    const calls: string[] = [];
+    const backend = (via: "local" | "cloud"): ScrapeBackend => ({
+      via,
+      scrape: () =>
+        Effect.suspend(() => {
+          calls.push(via);
+          if (via === "cloud") return Effect.succeed(jobPage);
+          return localReply instanceof FirecrawlRequestFailed
+            ? Effect.fail(localReply)
+            : Effect.succeed(localReply);
+        }),
+      map: () => Effect.succeed({ links: [] }),
+      creditUsage: Effect.die("unused"),
+    });
+    const { store, routes } = memoryScrapeRouteStore();
+    const firecrawl = makeScrapeRouter({
+      mode: "hybrid",
+      local: backend("local"),
+      cloud: backend("cloud"),
+      routes: store,
+    });
+    return { firecrawl, routes, calls };
+  };
+
+  test.each<[string, FirecrawlRequestFailed]>([
+    ["no response", new FirecrawlRequestFailed({ status: null, message: "ECONNREFUSED" })],
+    ["a timeout", new FirecrawlRequestFailed({ status: 408, message: "Request timed out" })],
+    [
+      "an engine failure",
+      new FirecrawlRequestFailed({ status: 500, message: "All scraping engines failed" }),
+    ],
+    ["a 503", new FirecrawlRequestFailed({ status: 503, message: "Service unavailable" })],
+  ])("retries on the cloud without noting the site when local gives %s", (_name, error) =>
+    runTest(
+      Effect.gen(function* () {
+        const { firecrawl, routes, calls } = hybridRouter(error);
+        for (let i = 0; i < 3; i++) {
+          const page = yield* firecrawl.scrapeJob(url);
+          expect(page.usage.via).toBe("cloud");
+        }
+        expect(calls).toEqual(["local", "cloud", "local", "cloud", "local", "cloud"]);
+        expect(routes.has(domain)).toBe(false);
+      }),
+    ),
+  );
+
+  test("notes the site when the page itself answered 403", () =>
+    runTest(
+      Effect.gen(function* () {
+        const forbidden: ScrapedPage = { ...jobPage, metadata: { statusCode: 403 } };
+        const { firecrawl, routes } = hybridRouter(forbidden);
+        expect((yield* firecrawl.scrapeJob(url)).usage.via).toBe("cloud");
+        expect(routes.get(domain)).toEqual({ localBlocks: 1, preferCloudUntil: null });
       }),
     ));
 });

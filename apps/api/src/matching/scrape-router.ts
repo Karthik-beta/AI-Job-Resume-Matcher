@@ -288,9 +288,10 @@ const localOnly = <A>(local: ScrapeBackend, attempt: Attempt<A>) =>
     ),
   );
 
-// Local first; only a page the site blocked is retried on the cloud, once, with the auto
-// proxy. A gone or failed page would fail there too. Sites that keep blocking the local
-// instance go straight to the cloud for a while (see scrape-routes.ts).
+// Local first; only a page the site blocked, or one the local instance could not answer, is
+// retried on the cloud, once, with the auto proxy. A gone or failed page would fail there
+// too. Sites that keep blocking the local instance go straight to the cloud for a while (see
+// scrape-routes.ts).
 const hybrid = <A>(
   config: Extract<RouterConfig, { mode: "hybrid" }>,
   url: string,
@@ -304,8 +305,12 @@ const hybrid = <A>(
         yield* config.routes.localWorked(domain);
         return { value: sent.success, usage: { via: "local", credits: 0 } as const };
       }
-      if (outcome !== "blocked") return yield* failureOf(result, outcome, "local");
-      yield* noteLocalBlock(config.routes, domain);
+      if (outcome !== "blocked" && outcome !== "unreachable") {
+        return yield* failureOf(result, outcome, "local");
+      }
+      // Only the page's own evidence counts against the site: a local instance that is down
+      // or failing must not send every domain to the cloud for a week.
+      if (outcome === "blocked") yield* noteLocalBlock(config.routes, domain);
     }
     // Out of credits, the cloud refuses only the pages local cannot scrape, so the run goes on.
     const cloud = yield* budgetedCloud(config.cloud, attempt, "auto", needsCloud).pipe(
@@ -361,6 +366,10 @@ export const makeScrapeRouter = (config: RouterConfig) => {
   });
 };
 
+// A local scrape or map that takes longer than this is given up, so hybrid mode moves on to
+// the cloud instead of waiting out the SDK's five-minute default.
+export const localTimeoutMs = 60_000;
+
 const cloudBackend = (apiKey: string) =>
   Effect.map(cloudLimiter, (limiter) => makeBackend("cloud", sdkClient({ apiKey }), limiter));
 
@@ -368,7 +377,7 @@ const cloudBackend = (apiKey: string) =>
 // keeps the SDK from sending FIRECRAWL_API_KEY to it.
 const localBackend = (apiUrl: string) =>
   Effect.map(localLimiter, (limiter) =>
-    makeBackend("local", sdkClient({ apiKey: "", apiUrl }), limiter),
+    makeBackend("local", sdkClient({ apiKey: "", apiUrl, timeoutMs: localTimeoutMs }), limiter),
   );
 
 // The plan a router's cloud instance, if it has one, budgets against.

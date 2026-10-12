@@ -1,8 +1,10 @@
 import type { FirecrawlRequestFailed, PageKind, ScrapedPage } from "./firecrawl";
 
-// ok: use the page. blocked: the site kept the scraper out, so another instance may get in.
-// gone: the page no longer exists. failed: any other error, which retrying will not fix.
-export type ScrapeOutcome = "ok" | "blocked" | "gone" | "failed";
+// ok: use the page. blocked: the page itself shows the site kept the scraper out, so another
+// instance may get in. unreachable: the scraping instance gave no answer about the page (no
+// response, a timeout, or its own 5xx); another instance may get in, but the site is not to
+// blame. gone: the page no longer exists. failed: any other error, which retrying will not fix.
+export type ScrapeOutcome = "ok" | "blocked" | "unreachable" | "gone" | "failed";
 
 export type ScrapeResult =
   | { readonly page: ScrapedPage }
@@ -11,18 +13,24 @@ export type ScrapeResult =
 const blockedStatuses: ReadonlySet<number> = new Set([401, 403, 407, 429, 503]);
 const goneStatuses: ReadonlySet<number> = new Set([404, 410]);
 
-// Bot checks from Cloudflare, PerimeterX, DataDome, Imperva and others.
+// Bot checks from Cloudflare, PerimeterX, Akamai and others: phrases that appear only on
+// challenge pages.
 const challengeMarkers = [
   "just a moment",
   "attention required! | cloudflare",
   "cf-chl",
   "verify you are human",
-  "captcha",
   "access denied",
   "px-captcha",
-  "datadome",
-  "incapsula",
 ];
+
+// Names a normal page also carries, in a reCAPTCHA on its form or a DataDome or Imperva
+// script, so they count only on a page that otherwise looks like a challenge.
+const vendorMarkers = ["captcha", "recaptcha", "hcaptcha", "datadome", "incapsula"];
+const challengeTitle =
+  /just a moment|attention required|access denied|captcha|are you a robot|are you human|verify you|human verification|security check|pardon our interruption|one more step|request blocked|forbidden/i;
+// A challenge page is short; a job ad with its details is longer than this.
+const challengePageChars = 1_500;
 
 // A job ad has more text than this; a shorter page is a script shell the scraper could not
 // render, or a block page without a marker.
@@ -39,23 +47,34 @@ const outcomeOfStatus = (status: number): ScrapeOutcome | null => {
   return null;
 };
 
-const hasMarker = (text: string) => {
-  const lower = text.toLowerCase();
-  return challengeMarkers.some((marker) => lower.includes(marker));
+const hasMarker = ({ markdown, rawHtml, metadata }: ScrapedPage, markers: readonly string[]) => {
+  const found = (text: string) => {
+    const lower = text.toLowerCase();
+    return markers.some((marker) => lower.includes(marker));
+  };
+  return (
+    found(metadata?.title ?? "") ||
+    found((markdown ?? "").slice(0, markerSearchChars)) ||
+    (rawHtml !== undefined && rawHtml.length < challengeHtmlChars && found(rawHtml))
+  );
 };
 
-const hasChallenge = ({ markdown, rawHtml, metadata }: ScrapedPage) =>
-  hasMarker(metadata?.title ?? "") ||
-  hasMarker((markdown ?? "").slice(0, markerSearchChars)) ||
-  (rawHtml !== undefined && rawHtml.length < challengeHtmlChars && hasMarker(rawHtml));
+const looksLikeChallenge = ({ markdown, metadata }: ScrapedPage) =>
+  challengeTitle.test(metadata?.title ?? "") || (markdown ?? "").trim().length < challengePageChars;
+
+const hasChallenge = (page: ScrapedPage) =>
+  hasMarker(page, challengeMarkers) || (looksLikeChallenge(page) && hasMarker(page, vendorMarkers));
 
 // `kind` "map" judges only errors: a map has no page content.
 export const classifyScrape = (result: ScrapeResult, kind: PageKind | "map"): ScrapeOutcome => {
   if ("error" in result) {
     const { status } = result.error;
-    // No response, a timeout, or every engine failing (Firecrawl's 500) means the scraper
-    // did not get past the site. Any other API status is a request the page cannot fix.
-    if (status === null || status === 408 || status >= 500) return "blocked";
+    // No response, a timeout, every engine failing (Firecrawl's 500), or the instance's own
+    // auth or rate limit says nothing about the site: the site's answer comes back as a page
+    // with its status. Any other API status is a request the page cannot fix.
+    if (status === null || status === 408 || status >= 500 || blockedStatuses.has(status)) {
+      return "unreachable";
+    }
     return outcomeOfStatus(status) ?? "failed";
   }
   if (kind === "map") return "ok";

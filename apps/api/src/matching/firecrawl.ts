@@ -310,16 +310,30 @@ export const firecrawlFrom = (route: {
 
 // The SDK client for one instance. Every scrape asks for the main content without ads or
 // inline images; a PDF comes back as base64 for one credit instead of one per page (see
-// pdfOrMarkdown).
-export const sdkClient = (options: { readonly apiKey: string; readonly apiUrl?: string }) => {
-  // The SDK counts attempts, not retries, so 1 turns its own retries off.
-  const client = new FirecrawlClient({ ...options, maxRetries: 1 });
+// pdfOrMarkdown). `timeoutMs` caps each scrape and every request; the local instance uses
+// it so a hung scrape falls back to the cloud in a minute rather than the SDK's five. It
+// also turns off the SDK's auto-resume of long scrapes, which would outlast it.
+export const sdkClient = (options: {
+  readonly apiKey: string;
+  readonly apiUrl?: string;
+  readonly timeoutMs?: number;
+}) => {
+  const { timeoutMs, ...connection } = options;
+  // The SDK counts attempts, not retries, so 1 turns its own retries off. Its request
+  // timeout is the scrape's plus a margin for the reply, as the SDK itself adds.
+  const client = new FirecrawlClient({
+    ...connection,
+    maxRetries: 1,
+    ...(timeoutMs === undefined ? {} : { timeoutMs: timeoutMs + 5_000 }),
+  });
+  const limit = timeoutMs === undefined ? {} : { timeout: timeoutMs, autoResume: false };
   return {
     scrape: (url, { formats, ...request }) =>
       Effect.tryPromise({
         try: () =>
           client.scrape(url, {
             ...request,
+            ...limit,
             formats: [...formats],
             onlyMainContent: true,
             blockAds: true,
