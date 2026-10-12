@@ -17,7 +17,12 @@ import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
 import { evaluationText, isExpired, withPosting } from "../matching/job-posting";
 import type { ListingExtractor } from "../matching/listing-extractor";
-import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
+import {
+  jobPageFor,
+  type PageCacheStore,
+  type ScrapeVia,
+  scrapeSourceListings,
+} from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
@@ -90,12 +95,15 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
 
 const runWith = (prisma: PrismaClient, runId: string, model: string, credits: RunCredits) => {
   const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
-    query(() =>
-      prisma.run.update({
-        where: { id: runId },
-        data: { status, stopReason, finishedAt: new Date() },
-      }),
-    ).pipe(Effect.asVoid);
+    Effect.gen(function* () {
+      const cloudCredits = yield* credits.spent;
+      yield* query(() =>
+        prisma.run.update({
+          where: { id: runId },
+          data: { status, stopReason, cloudCredits, finishedAt: new Date() },
+        }),
+      );
+    });
 
   return Effect.gen(function* () {
     // Only a queued run is claimed, so a duplicate delivery does nothing.
@@ -130,6 +138,14 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       yield* evaluator.preflight;
       yield* scrapeHealth.check;
       const allowance = yield* credits.start(scheduled);
+      if (allowance) {
+        yield* query(() =>
+          prisma.run.update({
+            where: { id: runId },
+            data: { cloudCreditsAtStart: allowance.remaining },
+          }),
+        );
+      }
       // A cloud run stops up front when even its sources would not fit.
       if (allowance && mode === "cloud") {
         let needed = 0;
@@ -265,9 +281,12 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     }
 
     for (const job of selected) {
+      // Kept when the evaluation fails after the page was read.
+      let scrapedVia: ScrapeVia | null = null;
       const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
         Effect.flatMap((page) =>
           Effect.gen(function* () {
+            scrapedVia = page.via;
             const enriched = withPosting(job, page.posting);
             if (isExpired(page.posting, yield* Clock.currentTimeMillis)) {
               return { enriched, verdict: expired };
@@ -307,7 +326,8 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       const matchSaved = saved?._tag === "Success";
       const failed = result.error !== null || saved?._tag === "Failure";
 
-      const fields = { runId, ...listing, ...result, matchSaved };
+      const fields = { runId, ...listing, ...result, matchSaved, scrapedVia };
+      const cloudCredits = yield* credits.spent;
       yield* query(() =>
         prisma.$transaction([
           prisma.jobResult.upsert({
@@ -317,7 +337,11 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
           }),
           prisma.run.update({
             where: { id: runId },
-            data: { checked: { increment: 1 }, failed: { increment: failed ? 1 : 0 } },
+            data: {
+              checked: { increment: 1 },
+              failed: { increment: failed ? 1 : 0 },
+              cloudCredits,
+            },
           }),
         ]),
       );

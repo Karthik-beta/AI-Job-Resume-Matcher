@@ -74,20 +74,24 @@ enum RunTrigger {
 }
 
 model Run {
-  id         String      @id @default(uuid(7))
-  userId     String
-  trigger    RunTrigger
-  status     RunStatus   @default(QUEUED)
-  contextKey String // hash of resume content + source ids + model + requirements
-  sourceIds  String[]
-  found      Int         @default(0)
-  eligible   Int         @default(0)
-  checked    Int         @default(0)
-  failed     Int         @default(0)
-  stopReason String?
-  createdAt  DateTime    @default(now())
-  finishedAt DateTime?
-  results    JobResult[]
+  id                  String      @id @default(uuid(7))
+  userId              String
+  trigger             RunTrigger
+  status              RunStatus   @default(QUEUED)
+  contextKey          String // hash of resume content + source ids + model + requirements
+  sourceIds           String[]
+  found               Int         @default(0)
+  eligible            Int         @default(0)
+  checked             Int         @default(0)
+  failed              Int         @default(0)
+  stopReason          String?
+  // Firecrawl cloud credits the run used, and the plan's credits when it started (null when
+  // the run had no cloud plan to read).
+  cloudCredits        Int         @default(0)
+  cloudCreditsAtStart Int?
+  createdAt           DateTime    @default(now())
+  finishedAt          DateTime?
+  results             JobResult[]
 
   @@index([userId, createdAt])
 }
@@ -95,6 +99,14 @@ model Run {
 enum SkipReason {
   EXPIRED // the job page's structured data says the posting has closed
   TRIAGE // title triage ranked it below the threshold
+}
+
+// How a job's text was read.
+enum ScrapeVia {
+  ATS // with the listing, or from the job board's API
+  CACHE // the page cache
+  LOCAL // the local Firecrawl
+  CLOUD // the cloud Firecrawl, including a hybrid run's fallback
 }
 
 model JobResult {
@@ -113,6 +125,7 @@ model JobResult {
   reason      String?
   error       String?
   skipped     SkipReason? // set when the job was settled without an evaluation
+  scrapedVia  ScrapeVia? // null when the job page was not read (or a PDF was downloaded)
   matchSaved  Boolean     @default(false)
   createdAt   DateTime    @default(now())
 

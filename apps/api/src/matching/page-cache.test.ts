@@ -304,6 +304,7 @@ describe("job pages for listings", () => {
     const { run, scraped, requests, rows } = setup();
     const page = await run(jobPageFor("alice", { ...job, description: "Ad text" }, "LEVER"));
     expect(page.posting).toBeNull();
+    expect(page.via).toBe("ATS");
     expect(page.markdown).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
     expect([...scraped, ...requests]).toEqual([]);
     expect(rows.size).toBe(0);
@@ -325,15 +326,20 @@ describe("job pages for listings", () => {
     ]);
     const [first, second] = await run(program);
     expect(first.markdown).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
-    expect(second).toEqual(first);
+    expect(second).toEqual({ ...first, via: "CACHE" });
+    expect(first.via).toBe("ATS");
     expect(requests).toEqual([`GET ${apiUrl}`]);
     expect(scraped).toEqual([]);
   });
 
   test("scrapes the job page when the source cannot supply the ad", async () => {
     const { run, scraped } = setup();
-    expect(await run(jobPageFor("alice", job, "PAGE"))).toEqual(plain("Markdown 1"));
+    expect(await run(jobPageFor("alice", job, "PAGE"))).toEqual({
+      ...plain("Markdown 1"),
+      via: "CLOUD",
+    });
     expect(scraped).toEqual([jobUrl]);
+    expect((await run(jobPageFor("alice", job, "PAGE"))).via).toBe("CACHE");
   });
 });
 

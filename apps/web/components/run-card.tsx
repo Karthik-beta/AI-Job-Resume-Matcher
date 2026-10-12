@@ -1,9 +1,16 @@
 import { RetrySaveButton } from "@/components/retry-save-button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { type Verdict, VerdictBadge } from "@/components/verdict-badge";
-import { isActive, type JobResult, type RunDetail, type RunStatus } from "@/lib/runs";
+import {
+  isActive,
+  type JobResult,
+  type RunDetail,
+  type RunStatus,
+  type ScrapeVia,
+} from "@/lib/runs";
 
 export const statusLabels: Record<RunStatus, string> = {
   QUEUED: "Waiting to start",
@@ -12,6 +19,28 @@ export const statusLabels: Record<RunStatus, string> = {
   STOPPED: "Stopped",
   FAILED: "Failed",
 };
+
+const scrapedViaLabels: Record<ScrapeVia, string> = {
+  ATS: "Job board API",
+  CACHE: "Cached page",
+  LOCAL: "Local scrape",
+  CLOUD: "Cloud scrape",
+};
+
+// Remaining is known only when the run read the cloud plan's credits.
+function CloudCredits({ run }: { run: RunDetail }) {
+  if (run.cloudCreditsAtStart === null && run.cloudCredits === 0) return null;
+  const remaining =
+    run.cloudCreditsAtStart === null
+      ? null
+      : Math.max(0, run.cloudCreditsAtStart - run.cloudCredits);
+  return (
+    <p className="text-sm text-muted-foreground">
+      Cloud credits used: {run.cloudCredits}
+      {remaining !== null && ` · remaining: ${remaining}`}
+    </p>
+  );
+}
 
 function verdictOf(result: JobResult): Verdict {
   if (result.skipped === "EXPIRED") return "expired";
@@ -59,6 +88,7 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
           <Stat label="Checked" value={run.checked} />
           <Stat label="Failed" value={run.failed} />
         </dl>
+        <CloudCredits run={run} />
         {triaged.length > 0 && (
           <p className="text-sm text-muted-foreground">Skipped by title triage: {triaged.length}</p>
         )}
@@ -92,7 +122,12 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
                       </a>
                       <p className="text-sm text-muted-foreground">{result.company}</p>
                     </div>
-                    <VerdictBadge verdict={verdictOf(result)} />
+                    <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                      {result.scrapedVia && (
+                        <Badge variant="outline">{scrapedViaLabels[result.scrapedVia]}</Badge>
+                      )}
+                      <VerdictBadge verdict={verdictOf(result)} />
+                    </div>
                   </div>
                   {(result.error ?? result.reason) && (
                     <p className="text-sm leading-relaxed text-muted-foreground">

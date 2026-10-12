@@ -115,12 +115,21 @@ const downloadPdf = (url: string) =>
     return isSuccess(status) && isPdf(body) ? body : null;
   });
 
-const fetchJobPage = (url: string) =>
+// How a job's text was read, as JobResult.scrapedVia records it; null for a downloaded PDF.
+export type ScrapeVia = "ATS" | "CACHE" | "LOCAL" | "CLOUD";
+
+interface ReadVia {
+  via: ScrapeVia | null;
+}
+
+const fetchJobPage = (url: string, read: ReadVia = { via: null }) =>
   Effect.gen(function* () {
+    read.via = null;
     const pdf = yield* downloadPdf(url);
     if (pdf) return { markdown: yield* (yield* PdfParser).parse(pdf), posting: null };
     const firecrawl = yield* Firecrawl;
-    const { markdown, rawHtml } = yield* firecrawl.scrapeJob(url);
+    const { markdown, rawHtml, usage } = yield* firecrawl.scrapeJob(url);
+    read.via = usage.via === "cloud" ? "CLOUD" : "LOCAL";
     return {
       markdown: yield* pdfOrMarkdown(markdown),
       posting: rawHtml ? parseJobPosting(rawHtml) : null,
@@ -168,16 +177,25 @@ const withDescription = (listing: Listing, description: string) =>
 
 // A listing that came with its job ad is not scraped. Otherwise the source's API supplies the
 // ad when it can, and the page is scraped as a last resort; both are cached like job pages.
+// `via` says which of these supplied the text.
 export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =>
   Effect.gen(function* () {
     if (listing.description !== undefined) {
-      return { markdown: withDescription(listing, listing.description), posting: null };
+      const markdown = withDescription(listing, listing.description);
+      return { markdown, posting: null, via: "ATS" as ScrapeVia | null };
     }
     const { fetchDescription } = adapterFor(kind);
-    if (!fetchDescription) return yield* scrapeJobPage(userId, listing.url);
-    return yield* cachedJobPage(userId, listing.url, () =>
-      fetchDescription(listing).pipe(
-        Effect.map((text) => ({ markdown: withDescription(listing, text), posting: null })),
-      ),
-    );
+    // Left as CACHE when the cache answers without reading anything.
+    const read: ReadVia = { via: "CACHE" };
+    const page = fetchDescription
+      ? yield* cachedJobPage(userId, listing.url, () =>
+          fetchDescription(listing).pipe(
+            Effect.map((text) => {
+              read.via = "ATS";
+              return { markdown: withDescription(listing, text), posting: null };
+            }),
+          ),
+        )
+      : yield* cachedJobPage(userId, listing.url, () => fetchJobPage(listing.url, read));
+    return { ...page, via: read.via };
   });

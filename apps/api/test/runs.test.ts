@@ -159,7 +159,15 @@ describe("run status", () => {
     const run = await createRun(new Date());
     await prisma.run.update({
       where: { id: run.id },
-      data: { status: "STOPPED", stopReason: "User not found.", found: 3, eligible: 2, checked: 1 },
+      data: {
+        status: "STOPPED",
+        stopReason: "User not found.",
+        found: 3,
+        eligible: 2,
+        checked: 1,
+        cloudCredits: 4,
+        cloudCreditsAtStart: 900,
+      },
     });
     await prisma.jobResult.create({
       data: {
@@ -172,6 +180,7 @@ describe("run status", () => {
         isMatch: true,
         reason: "Strong fit",
         matchSaved: true,
+        scrapedVia: "CLOUD",
       },
     });
 
@@ -184,8 +193,16 @@ describe("run status", () => {
       eligible: 2,
       checked: 1,
       failed: 0,
+      cloudCredits: 4,
+      cloudCreditsAtStart: 900,
       results: [
-        { jobUrl: "https://jobs.example.com/1", isMatch: true, reason: "Strong fit", error: null },
+        {
+          jobUrl: "https://jobs.example.com/1",
+          isMatch: true,
+          reason: "Strong fit",
+          error: null,
+          scrapedVia: "CLOUD",
+        },
       ],
     });
   });

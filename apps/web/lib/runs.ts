@@ -15,9 +15,16 @@ const Run = Schema.Struct({
   checked: Schema.Number,
   failed: Schema.Number,
   stopReason: Schema.NullOr(Schema.String),
+  // Firecrawl cloud credits used, and the plan's credits when the run started (null without
+  // a cloud plan).
+  cloudCredits: Schema.Number,
+  cloudCreditsAtStart: Schema.NullOr(Schema.Number),
   createdAt: Schema.String,
 });
 export type Run = typeof Run.Type;
+
+const ScrapeVia = Schema.Literals(["ATS", "CACHE", "LOCAL", "CLOUD"]);
+export type ScrapeVia = typeof ScrapeVia.Type;
 
 const JobResult = Schema.Struct({
   id: Schema.String,
@@ -30,6 +37,8 @@ const JobResult = Schema.Struct({
   // Settled without an evaluation.
   skipped: Schema.NullOr(Schema.Literals(["EXPIRED", "TRIAGE"])),
   matchSaved: Schema.Boolean,
+  // How the job's text was read; null when it was not.
+  scrapedVia: Schema.NullOr(ScrapeVia),
 });
 export type JobResult = typeof JobResult.Type;
 

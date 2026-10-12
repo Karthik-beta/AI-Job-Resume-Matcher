@@ -309,6 +309,8 @@ describe("process run", () => {
 
     expect(evaluated).toEqual([jobUrl("1")]);
     expect(run).toMatchObject({ status: "STOPPED", stopReason: "User not found.", checked: 0 });
+    // Without a cloud plan the run has no starting credits.
+    expect(run.cloudCreditsAtStart).toBeNull();
     expect(run.finishedAt).not.toBeNull();
     expect(await prisma.jobResult.count({ where: { runId: run.id } })).toBe(0);
   });
@@ -416,6 +418,8 @@ describe("process run", () => {
       "# Described\n\nExample · Bengaluru\n\nRemote\n\nBuild payment APIs.",
     ]);
     expect(finished).toMatchObject({ status: "COMPLETED", checked: 1, failed: 0 });
+    const described = await prisma.jobResult.findFirstOrThrow({ where: { runId: run.id } });
+    expect(described.scrapedVia).toBe("ATS");
     // The first check of a page source records the board it embeds.
     const checked = await prisma.jobSource.findUniqueOrThrow({ where: { id: source.id } });
     expect(checked).toMatchObject({ suggestedKind: "GREENHOUSE", suggestedAdapterKey: "acme" });
@@ -625,6 +629,8 @@ describe("process run", () => {
         status: "STOPPED",
         stopReason: "Firecrawl credit reserve reached (50 left until 2099-01-01)",
         checked: 2,
+        cloudCredits: 4,
+        cloudCreditsAtStart: 54,
       });
     });
 
@@ -646,7 +652,13 @@ describe("process run", () => {
       });
       expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
       expect(scraped).toEqual([sourceA, sourceB, jobUrl("1"), jobUrl("3")]);
-      expect(run).toMatchObject({ status: "COMPLETED", checked: 3 });
+      expect(run).toMatchObject({ status: "COMPLETED", checked: 3, cloudCredits: 4 });
+      const via = await prisma.jobResult.findMany({
+        where: { runId: run.id },
+        orderBy: { jobUrl: "asc" },
+        select: { scrapedVia: true },
+      });
+      expect(via.map(({ scrapedVia }) => scrapedVia)).toEqual(["CLOUD", "CLOUD", "CACHE"]);
 
       // A manual run may use more than the day's share.
       await fresh();
