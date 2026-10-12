@@ -6,7 +6,9 @@ import {
   isJobLink,
   isUsableTitle,
   markdownLinks,
+  nextPageUrl,
   normaliseUrl,
+  slugTitle,
 } from "./page-links";
 
 describe("findJobLinks", () => {
@@ -149,5 +151,54 @@ describe("links", () => {
     ["http://[invalid", null],
   ])("normalises %p", (link, url) => {
     expect(normaliseUrl(link, "https://acme.com/careers")).toBe(url);
+  });
+});
+
+describe("nextPageUrl", () => {
+  const source = "https://acme.com/careers";
+
+  test.each([
+    ["[Next](/careers?page=2)", source, "https://acme.com/careers?page=2"],
+    ["[Next page ›](/careers/all?start=10)", source, "https://acme.com/careers/all?start=10"],
+    [
+      "[»](https://acme.com/careers/page/3)",
+      "https://acme.com/careers/page/2",
+      "https://acme.com/careers/page/3",
+    ],
+    ["[1](/careers) [2](/careers?p=2) [3](/careers?p=3)", source, "https://acme.com/careers?p=2"],
+    [
+      "[1](/careers?p=1) [2](/careers?p=2) [3](/careers?p=3)",
+      "https://acme.com/careers?p=2",
+      "https://acme.com/careers?p=3",
+    ],
+    ["[More](/careers?offset=20)", source, "https://acme.com/careers?offset=20"],
+    ["[2](/careers/page/2/)", source, "https://acme.com/careers/page/2"],
+  ])("follows %p from %p", (markdown, page, next) => {
+    expect(nextPageUrl(markdown, page, source)).toBe(next);
+  });
+
+  test.each([
+    ["no links", "Jobs"],
+    ["a previous page", "[Previous](/careers?page=1) [1](/careers?page=1)"],
+    ["another path's pages", "[2](/blog?page=2)"],
+    ["another host", "[Next](https://other.com/careers?page=2)"],
+    ["the page itself", "[Next](/careers?page=2#top)"],
+    ["a job link", "[Engineer](/careers/engineer/)"],
+  ])("ignores %s", (_, markdown) => {
+    expect(nextPageUrl(markdown, "https://acme.com/careers?page=2", source)).toBeNull();
+  });
+});
+
+describe("slugTitle", () => {
+  test.each([
+    ["https://acme.com/jobs/senior-backend-engineer-123456", "Senior Backend Engineer"],
+    ["https://acme.com/careers/data_engineer/", "Data Engineer"],
+    ["https://acme.com/jobs/4012345", "Jobs"],
+    ["https://acme.com/jobs/product-designer/4012345", "Product Designer"],
+    ["https://acme.com/jobs/sre-0c1d2e3f-4a5b-6c7d-8e9f-0a1b2c3d4e5f", "Sre"],
+    ["https://acme.com/jobs/qa%20lead.html", "Qa Lead"],
+    ["https://acme.com/jobs/bad%E0%A4%A", "Bad%E0%A4%A"],
+  ])("titles %p as %p", (url, title) => {
+    expect(slugTitle(url)).toBe(title);
   });
 });

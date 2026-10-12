@@ -15,6 +15,10 @@ export interface ListingSource {
   readonly lastCheckedAt?: Date | null;
   // A CSS selector for the part of a page source that lists the jobs.
   readonly selector?: string | null;
+  // Pages of a page source's listings to read, counting the first.
+  readonly maxPages?: number;
+  // Read a page source's job links from Firecrawl's map of the site.
+  readonly useMap?: boolean;
   // The hash of the page source's markdown when its listings were last read.
   readonly listingHash?: string | null;
 }

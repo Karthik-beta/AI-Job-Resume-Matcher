@@ -58,6 +58,8 @@ export const fakeFirecrawl = Firecrawl.of({
         siteName: null,
       })),
     ),
+  // No map has job links, so sources that use one fall back to their page.
+  map: (url) => scriptedError(url).pipe(Effect.as([])),
 });
 
 // The listings in listings.json, which name the fixture board's job pages.

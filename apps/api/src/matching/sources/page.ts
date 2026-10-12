@@ -3,15 +3,29 @@ import { Effect } from "effect";
 import { ScrapeFailed } from "../errors";
 import { Firecrawl, type Listing, type ListingPage } from "../firecrawl";
 import { ListingExtractor } from "../listing-extractor";
-import type { SourceAdapter } from "./adapter";
+import type { ListingSource, SourceAdapter } from "./adapter";
 import { detectEmbeddedBoard } from "./embedded";
-import { findJobLinks, markdownLinks, normaliseUrl } from "./page-links";
+import {
+  findJobLinks,
+  isJobLink,
+  isUsableTitle,
+  markdownLinks,
+  nextPageUrl,
+  normaliseUrl,
+  slugTitle,
+} from "./page-links";
 
 // About 15k tokens, enough for a long careers page.
 export const maxExtractionChars = 60_000;
+// The JobSource.maxPages default.
+const defaultMaxPages = 3;
+const mapLimit = 200;
 
-const companyOf = (pageUrl: string, page: ListingPage) =>
-  page.siteName ?? new URL(pageUrl).hostname.replace(/^www\./, "");
+export interface SourcePage extends ListingPage {
+  readonly url: string;
+}
+
+const hostName = (url: string) => new URL(url).hostname.replace(/^www\./, "");
 
 const listing = (fields: Pick<Listing, "title" | "url" | "company">): Listing => ({
   ...fields,
@@ -22,37 +36,38 @@ const listing = (fields: Pick<Listing, "title" | "url" | "company">): Listing =>
   postedAt: null,
 });
 
-// The model reads the page only when its links show no titled jobs. It keeps only URLs that
-// are on the page, so a made-up or mangled link is dropped.
-const extractWithModel = (pageUrl: string, page: ListingPage) =>
+// The model reads the pages only when their links show no titled jobs. It keeps only URLs
+// that are on the pages, so a made-up or mangled link is dropped.
+const extractWithModel = (sourceUrl: string, pages: readonly SourcePage[], company: string) =>
   Effect.gen(function* () {
-    if (!page.markdown.trim()) return [];
-    let markdown = page.markdown;
+    let markdown = pages.map((page) => page.markdown).join("\n\n");
+    if (!markdown.trim()) return [];
     if (markdown.length > maxExtractionChars) {
       yield* Effect.logInfo(
-        `Listing extraction reads the first ${maxExtractionChars} of ${markdown.length} characters of ${pageUrl}.`,
+        `Listing extraction reads the first ${maxExtractionChars} of ${markdown.length} characters of ${sourceUrl}.`,
       );
       markdown = markdown.slice(0, maxExtractionChars);
     }
     const extractor = yield* ListingExtractor;
-    const found = yield* extractor.extract({ url: pageUrl, markdown }).pipe(
+    const found = yield* extractor.extract({ url: sourceUrl, markdown }).pipe(
       Effect.mapError(
         (error) =>
           new ScrapeFailed({
             status: null,
-            message: `Could not read the listings on ${pageUrl}: ${error.message}`,
+            message: `Could not read the listings on ${sourceUrl}: ${error.message}`,
           }),
       ),
     );
-    const onPage = new Set(
-      [...page.links, ...markdownLinks(page.markdown).map(({ url }) => url)].map((url) =>
-        normaliseUrl(url, pageUrl),
+    const onPages = new Set(
+      pages.flatMap((page) =>
+        [...page.links, ...markdownLinks(page.markdown).map(({ url }) => url)].map((url) =>
+          normaliseUrl(url, page.url),
+        ),
       ),
     );
-    const company = companyOf(pageUrl, page);
     return found.flatMap((job) => {
-      const url = normaliseUrl(job.url, pageUrl);
-      return url && onPage.has(url)
+      const url = normaliseUrl(job.url, sourceUrl);
+      return url && onPages.has(url)
         ? [{ ...job, url, company: job.company.trim() || company }]
         : [];
     });
@@ -62,37 +77,85 @@ const extractWithModel = (pageUrl: string, page: ListingPage) =>
 export const listingHashOf = (markdown: string) =>
   createHash("sha256").update(markdown.trim().replace(/\s+/g, " ")).digest("hex");
 
-export const pageListings = (pageUrl: string, page: ListingPage) => {
-  const company = companyOf(pageUrl, page);
-  const titled = findJobLinks(page.markdown, pageUrl).flatMap(({ url, title }) =>
-    title ? [listing({ title, url, company })] : [],
-  );
-  return titled.length > 0 ? Effect.succeed(titled) : extractWithModel(pageUrl, page);
+export const pageListings = (sourceUrl: string, pages: readonly SourcePage[]) => {
+  const company = pages[0]?.siteName ?? hostName(sourceUrl);
+  const titled = new Map<string, Listing>();
+  for (const page of pages) {
+    for (const { url, title } of findJobLinks(page.markdown, page.url)) {
+      if (title && !titled.has(url)) titled.set(url, listing({ title, url, company }));
+    }
+  }
+  return titled.size > 0
+    ? Effect.succeed([...titled.values()])
+    : extractWithModel(sourceUrl, pages, company);
 };
 
-// Any other careers page: job links are read from its markdown, and the model reads the page
-// when they cannot be. The first check also fetches the page's HTML (no extra credits) to
-// spot an embedded ATS board.
+// Follows the source's "next page" links up to its page limit, stopping at a repeated page.
+const scrapePages = (source: ListingSource) =>
+  Effect.gen(function* () {
+    const firecrawl = yield* Firecrawl;
+    const selector = source.selector ?? null;
+    const first = yield* firecrawl.scrapeListingPage(source.url, {
+      selector,
+      withHtml: source.lastCheckedAt === null,
+    });
+    const pages: SourcePage[] = [{ ...first, url: source.url }];
+    const seen = new Set([listingHashOf(first.markdown)]);
+    let last = pages[0];
+    while (last && pages.length < (source.maxPages ?? defaultMaxPages)) {
+      const next = nextPageUrl(last.markdown, last.url, source.url);
+      if (!next || pages.some((page) => normaliseUrl(page.url, page.url) === next)) break;
+      const page = yield* firecrawl.scrapeListingPage(next, { selector });
+      const hash = listingHashOf(page.markdown);
+      if (seen.has(hash)) break;
+      seen.add(hash);
+      last = { ...page, url: next };
+      pages.push(last);
+    }
+    return pages;
+  });
+
+// Job links from Firecrawl's map of the site, titled by their slugs.
+const mapListings = (source: ListingSource) =>
+  Effect.gen(function* () {
+    const firecrawl = yield* Firecrawl;
+    const links = yield* firecrawl.map(source.url, { search: "job", limit: mapLimit });
+    const company = hostName(source.url);
+    const byUrl = new Map<string, Listing>();
+    for (const link of links) {
+      const url = normaliseUrl(link.url, source.url);
+      if (!url || byUrl.has(url) || !isJobLink(link.url, source.url)) continue;
+      const title = slugTitle(url);
+      if (isUsableTitle(title)) byUrl.set(url, listing({ title, url, company }));
+    }
+    return [...byUrl.values()];
+  });
+
+// Any other careers page: job links are read from its markdown, across its next pages, and
+// the model reads the pages when they cannot be. A source can opt in to Firecrawl's map of
+// the site instead, falling back to its pages when the map has no job links. The first
+// check also fetches the page's HTML (no extra credits) to spot an embedded ATS board.
 export const pageAdapter: SourceAdapter = {
   fetchListings: (source, previous) =>
     Effect.gen(function* () {
-      const firecrawl = yield* Firecrawl;
-      const withHtml = source.lastCheckedAt === null;
-      const page = yield* firecrawl.scrapeListingPage(source.url, {
-        selector: source.selector ?? null,
-        withHtml,
-      });
-      // An unchanged page keeps its last listings, without reading its links or the model.
-      const listingHash = listingHashOf(page.markdown);
+      if (source.useMap) {
+        const mapped = yield* mapListings(source);
+        if (mapped.length > 0) return { listings: mapped };
+        yield* Effect.logInfo(`Firecrawl's map has no job links for ${source.url}.`);
+      }
+      const pages = yield* scrapePages(source);
+      // Unchanged pages keep their last listings, without reading their links or the model.
+      const listingHash = listingHashOf(pages.map(({ markdown }) => markdown).join("\n"));
       const listings =
         previous && source.listingHash === listingHash
           ? previous
-          : yield* pageListings(source.url, page);
-      if (!withHtml) return { listings, listingHash };
+          : yield* pageListings(source.url, pages);
+      const [first] = pages;
+      if (source.lastCheckedAt !== null || !first) return { listings, listingHash };
       return {
         listings,
         listingHash,
-        embedded: detectEmbeddedBoard(page.rawHtml ?? "", page.links),
+        embedded: detectEmbeddedBoard(first.rawHtml ?? "", first.links),
       };
     }),
 };

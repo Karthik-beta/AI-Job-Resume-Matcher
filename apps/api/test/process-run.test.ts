@@ -100,6 +100,7 @@ describe("process run", () => {
             siteName: null,
           };
         }),
+      map: () => Effect.die("unused"),
     });
     // The jobs' links carry no titles, so the model reads each page.
     const extractor = ListingExtractor.of({

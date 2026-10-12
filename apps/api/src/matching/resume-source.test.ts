@@ -79,6 +79,7 @@ const setup = (
                 return typeof next === "string" ? Effect.succeed(next) : Effect.fail(next);
               }),
             scrapeListingPage: () => Effect.die("unused"),
+            map: () => Effect.die("unused"),
           }),
         ),
       ),

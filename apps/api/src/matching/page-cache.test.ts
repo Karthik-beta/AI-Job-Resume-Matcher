@@ -77,6 +77,7 @@ const fakeFirecrawl = (fail = false, markdown?: string, listingMarkdown = "[Engi
         scraped.push(url);
         return { markdown: listingMarkdown, links: [], rawHtml: null, siteName: "Example" };
       }),
+    map: () => Effect.die("unused"),
   });
   return { scraped, firecrawl };
 };

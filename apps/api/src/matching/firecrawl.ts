@@ -48,6 +48,21 @@ export type ScrapePage = (
   request: ScrapeRequest,
 ) => Effect.Effect<ScrapedPage, unknown>;
 
+export interface MappedLink {
+  readonly url: string;
+  readonly title?: string | undefined;
+}
+
+export interface MapOptions {
+  readonly search: string;
+  readonly limit: number;
+}
+
+export type MapSite = (
+  url: string,
+  options: MapOptions,
+) => Effect.Effect<{ readonly links: readonly MappedLink[] }, unknown>;
+
 export interface ListingPage {
   readonly markdown: string;
   readonly links: readonly string[];
@@ -66,6 +81,11 @@ export class Firecrawl extends Context.Service<
       url: string,
       options?: { readonly selector?: string | null; readonly withHtml?: boolean },
     ) => Effect.Effect<ListingPage, FirecrawlError>;
+    // The site's URLs, ordered by relevance to the search; one credit per call.
+    readonly map: (
+      url: string,
+      options: MapOptions,
+    ) => Effect.Effect<readonly MappedLink[], FirecrawlError>;
   }
 >()("Firecrawl") {}
 
@@ -94,7 +114,7 @@ const toFirecrawlError = (cause: unknown): FirecrawlError => {
   return new ScrapeFailed({ status: null, message });
 };
 
-export const makeFirecrawl = (scrape: ScrapePage) =>
+export const makeFirecrawl = (client: { readonly scrape: ScrapePage; readonly map: MapSite }) =>
   Effect.gen(function* () {
     const nextRequestAt = yield* Ref.make(0);
 
@@ -115,9 +135,9 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
         yield* Ref.update(nextRequestAt, (next) => Math.max(next, now + delay));
       });
 
-    const request = (url: string, scrapeRequest: ScrapeRequest) =>
+    const rateLimited = <A>(call: Effect.Effect<A, unknown>) =>
       waitForTurn.pipe(
-        Effect.andThen(scrape(url, scrapeRequest)),
+        Effect.andThen(call),
         Effect.tapError((cause) => (isRateLimited(cause) ? backOff(cause) : Effect.void)),
         Effect.mapError(toFirecrawlError),
         Effect.retry({
@@ -125,6 +145,9 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
           while: (error) => error._tag === "FirecrawlBlocked" && error.status === 429,
         }),
       );
+
+    const request = (url: string, scrapeRequest: ScrapeRequest) =>
+      rateLimited(client.scrape(url, scrapeRequest));
 
     return Firecrawl.of({
       scrapeMarkdown: (url) =>
@@ -155,6 +178,8 @@ export const makeFirecrawl = (scrape: ScrapePage) =>
             siteName: siteNameOf(page.metadata),
           })),
         ),
+      map: (url, options) =>
+        rateLimited(client.map(url, options)).pipe(Effect.map(({ links }) => links)),
     });
   });
 
@@ -163,12 +188,15 @@ export const firecrawlLayer = (apiKey: string) => {
   const client = new FirecrawlClient({ apiKey, maxRetries: 1 });
   return Layer.effect(
     Firecrawl,
-    makeFirecrawl((url, request) =>
-      Effect.tryPromise({
-        // A PDF comes back as base64 for one credit instead of one per page (see pdfOrMarkdown).
-        try: () => client.scrape(url, { ...request, formats: [...request.formats], parsers: [] }),
-        catch: (cause) => cause,
-      }),
-    ),
+    makeFirecrawl({
+      scrape: (url, request) =>
+        Effect.tryPromise({
+          // A PDF comes back as base64 for one credit instead of one per page (see pdfOrMarkdown).
+          try: () => client.scrape(url, { ...request, formats: [...request.formats], parsers: [] }),
+          catch: (cause) => cause,
+        }),
+      map: (url, options) =>
+        Effect.tryPromise({ try: () => client.map(url, { ...options }), catch: (cause) => cause }),
+    }),
   );
 };

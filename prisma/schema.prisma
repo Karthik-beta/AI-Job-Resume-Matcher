@@ -42,6 +42,8 @@ model JobSource {
   query               String? // SEARCH sources
   selector            String?
   maxPages            Int         @default(3)
+  // Read a page source's job links from Firecrawl's map of the site before scraping it.
+  useMap              Boolean     @default(false)
   listingHash         String?
   // An ATS board found embedded in a page source, offered to the user as a switch.
   suggestedKind       SourceKind?

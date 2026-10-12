@@ -5,6 +5,7 @@ import { TestClock } from "effect/testing";
 import {
   Firecrawl,
   firecrawlLayer,
+  type MapOptions,
   makeFirecrawl,
   type ScrapedPage,
   type ScrapeRequest,
@@ -12,23 +13,29 @@ import {
 
 interface Call {
   readonly url: string;
-  readonly request: ScrapeRequest;
+  readonly request: ScrapeRequest | MapOptions;
   readonly at: number;
 }
 
 type Reply = ScrapedPage | SdkError | Error;
 
-// Replays the scripted replies in order, repeating the last one.
+// Replays the scripted replies in order, repeating the last one. A map call replies with
+// the page's links.
 const fakeScrape = (replies: readonly Reply[]) => {
   const calls: Call[] = [];
-  const scrape = (url: string, request: ScrapeRequest) =>
+  const next = (url: string, request: ScrapeRequest | MapOptions) =>
     Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis;
       const reply = replies[Math.min(calls.length, replies.length - 1)];
       calls.push({ url, request, at });
       return reply instanceof Error ? yield* Effect.fail(reply) : (reply ?? {});
     });
-  return { calls, scrape };
+  const scrape = (url: string, request: ScrapeRequest) => next(url, request);
+  const map = (url: string, options: MapOptions) =>
+    next(url, options).pipe(
+      Effect.map((page) => ({ links: (page.links ?? []).map((link) => ({ url: link })) })),
+    );
+  return { calls, scrape, map };
 };
 
 // Runs the program with a test clock and fast-forwards through every sleep.
@@ -38,7 +45,7 @@ const run = <A, E>(
 ) => {
   const fake = fakeScrape(replies);
   return Effect.gen(function* () {
-    const firecrawl = yield* makeFirecrawl(fake.scrape);
+    const firecrawl = yield* makeFirecrawl(fake);
     const fiber = yield* Effect.forkChild(Effect.exit(program(firecrawl)));
     yield* TestClock.adjust("1 hour");
     const exit = yield* Fiber.join(fiber);
@@ -207,6 +214,32 @@ describe("errors", () => {
   });
 });
 
+describe("map", () => {
+  test("returns the site's links, spaced like scrapes", async () => {
+    const { exit, calls } = await run(
+      [{ markdown: "Job text", links: ["https://acme.com/jobs/1"] }],
+      (f) =>
+        Effect.all(
+          [
+            f.scrapeMarkdown("https://acme.com/a"),
+            f.map("https://acme.com", { search: "job", limit: 50 }),
+          ],
+          { concurrency: "unbounded" },
+        ),
+    );
+    expect(successOf(exit)[1]).toEqual([{ url: "https://acme.com/jobs/1" }]);
+    expect(calls[1]?.request).toEqual({ search: "job", limit: 50 });
+    expect(startTimes(calls)).toEqual([0, 6_100]);
+  });
+
+  test("maps errors like scrapes", async () => {
+    const { exit } = await run([new SdkError("Payment required", 402)], (f) =>
+      f.map("https://acme.com", { search: "job", limit: 50 }),
+    );
+    expect(failureOf(exit)).toMatchObject({ _tag: "FirecrawlBlocked", status: 402 });
+  });
+});
+
 describe("live layer", () => {
   test("passes the request to the SDK with PDF parsing off", async () => {
     // The overloads type the reply of a scrape with a JSON format, which this one has not.
@@ -228,6 +261,21 @@ describe("live layer", () => {
       });
     } finally {
       scrape.mockRestore();
+    }
+  });
+
+  test("passes the map search and limit to the SDK", async () => {
+    const map = spyOn(FirecrawlClient.prototype, "map").mockResolvedValue({
+      links: [{ url: "https://acme.com/jobs/1", title: "Engineer" }],
+    });
+    try {
+      const links = await Firecrawl.use((f) =>
+        f.map("https://acme.com", { search: "job", limit: 200 }),
+      ).pipe(Effect.provide(firecrawlLayer("test-key")), Effect.runPromise);
+      expect(links).toEqual([{ url: "https://acme.com/jobs/1", title: "Engineer" }]);
+      expect(map).toHaveBeenCalledWith("https://acme.com", { search: "job", limit: 200 });
+    } finally {
+      map.mockRestore();
     }
   });
 });

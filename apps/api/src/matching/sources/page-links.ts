@@ -141,3 +141,65 @@ export const findJobLinks = (markdown: string, pageUrl: string): JobLink[] => {
   }
   return [...byUrl.values()];
 };
+
+const pageParams = ["page", "p", "offset"];
+const pagedPath = /\/page\/(\d+)$/i;
+// "Next", "Next page", "Next ›", "›", "»" and the like.
+const nextLabel = /^(?:next(?:\s+page)?)?\s*[›»>→]*$/i;
+
+// The position of a page of listings: its page, p or offset parameter, or its /page/N suffix.
+const pageNumber = (url: URL) => {
+  const param = pageParams.map((name) => url.searchParams.get(name)).find((value) => value);
+  return Number(param ?? pagedPath.exec(url.pathname)?.[1] ?? 0) || 0;
+};
+
+const listPath = (url: URL) => url.pathname.replace(pagedPath, "").replace(/\/+$/, "");
+
+// The link to the next page of the source's listings: one labelled "Next" on the same host,
+// or else the nearest later page of the source's own path.
+export const nextPageUrl = (markdown: string, pageUrl: string, sourceUrl: string) => {
+  const page = new URL(pageUrl);
+  const source = new URL(sourceUrl);
+  const candidates = markdownLinks(markdown).flatMap(({ text, url: raw }) => {
+    const href = normaliseUrl(raw, pageUrl);
+    if (!href || href === normaliseUrl(pageUrl, pageUrl)) return [];
+    const url = new URL(href);
+    if (url.host !== source.host) return [];
+    const label = text
+      .replace(/[*_`\\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const isNext = label !== "" && nextLabel.test(label);
+    const isPage =
+      listPath(url) === listPath(source) &&
+      (pageParams.some((name) => url.searchParams.has(name)) || pagedPath.test(url.pathname));
+    return isNext || isPage ? [{ href, isNext, number: pageNumber(url) }] : [];
+  });
+  const later = candidates
+    .filter(({ number }) => number > pageNumber(page))
+    .sort((a, b) => a.number - b.number);
+  return (candidates.find(({ isNext }) => isNext) ?? later[0])?.href ?? null;
+};
+
+const decodeSegment = (segment: string) => {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+};
+
+const uuidSuffix = /[-_]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// A title from the URL's slug: /jobs/senior-backend-engineer-123 reads "Senior Backend Engineer".
+export const slugTitle = (link: string) => {
+  const segments = new URL(link).pathname.split("/").filter(Boolean).map(decodeSegment);
+  const slug = segments.reverse().find((segment) => !idSegment.test(segment)) ?? "";
+  return slug
+    .replace(/\.[a-z]+$/i, "")
+    .replace(uuidSuffix, "")
+    .split(/[-_+\s]+/)
+    .filter((word) => word && !/^\d{4,}$/.test(word))
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+};

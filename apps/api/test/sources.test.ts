@@ -89,7 +89,13 @@ describe("job sources", () => {
         .patch(`/api/sources/${source.id}`)
         .send({ kind: "PAGE", adapterKey: "acme" })
         .expect(200);
-      expect(reverted.body).toMatchObject({ kind: "PAGE", adapterKey: null });
+      expect(reverted.body).toMatchObject({ kind: "PAGE", adapterKey: null, useMap: false });
+
+      const mapped = await alice
+        .patch(`/api/sources/${source.id}`)
+        .send({ kind: "PAGE", adapterKey: null, useMap: true })
+        .expect(200);
+      expect(mapped.body).toMatchObject({ kind: "PAGE", useMap: true });
     } finally {
       await prisma.$disconnect();
     }
@@ -99,6 +105,7 @@ describe("job sources", () => {
     [{ kind: "GREENHOUSE", adapterKey: null }],
     [{ kind: "ASHBY", adapterKey: "  " }],
     [{ kind: "SEARCH", adapterKey: null }],
+    [{ kind: "PAGE", adapterKey: null, useMap: "yes" }],
     [{ kind: "OTHER", adapterKey: null }],
   ])("rejects an invalid override: %p", async (body) => {
     const { body: source } = await alice

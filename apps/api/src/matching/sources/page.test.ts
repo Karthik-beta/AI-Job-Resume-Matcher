@@ -4,7 +4,7 @@ import { fakeHttp } from "../../../test/ats";
 import { pageFixture } from "../../../test/pages";
 import { HttpFetch } from "../download";
 import { OpenRouterAuthError } from "../errors";
-import { Firecrawl, type Listing, type ListingPage } from "../firecrawl";
+import { Firecrawl, type Listing, type ListingPage, type MappedLink } from "../firecrawl";
 import { type ExtractionInput, ListingExtractor } from "../listing-extractor";
 import type { ListingSource } from "./adapter";
 import { HostLimiter, makeHostLimiter } from "./http";
@@ -32,9 +32,13 @@ interface Options {
   readonly extracted?: readonly Listing[];
   readonly failExtraction?: boolean;
   readonly previous?: readonly Listing[];
+  // Further pages of the listing, by URL.
+  readonly pages?: Record<string, Partial<ListingPage>>;
+  readonly mapped?: readonly MappedLink[];
 }
 
-// Serves each scraped page from `pages` and records what the adapter asked for.
+// Serves the further `pages` by URL, and the source's page for any other URL, so a next
+// page that is not scripted repeats the first. Records what the adapter asked for.
 const fetchPage = async (
   listingSource: ListingSource,
   page: Partial<ListingPage>,
@@ -43,12 +47,19 @@ const fetchPage = async (
   const scrapes: { url: string; selector: string | null; withHtml: boolean }[] = [];
   const extractions: ExtractionInput[] = [];
   const infos: string[] = [];
+  const maps: string[] = [];
   const firecrawl = Firecrawl.of({
     scrapeMarkdown: () => Effect.die("unused"),
     scrapeListingPage: (url, { selector = null, withHtml = false } = {}) =>
       Effect.sync(() => {
         scrapes.push({ url, selector, withHtml });
-        return { markdown: "", links: [], rawHtml: null, siteName: null, ...page };
+        const served = options.pages?.[url] ?? page;
+        return { markdown: "", links: [], rawHtml: null, siteName: null, ...served };
+      }),
+    map: (url, { search }) =>
+      Effect.sync(() => {
+        maps.push(`${url} ${search}`);
+        return options.mapped ?? [];
       }),
   });
   const extractor = ListingExtractor.of({
@@ -78,7 +89,7 @@ const fetchPage = async (
       ),
       Effect.runPromise,
     );
-  return { result, scrapes, extractions, infos };
+  return { result, scrapes, extractions, infos, maps };
 };
 
 const listingsOf = (result: Awaited<ReturnType<typeof fetchPage>>["result"]) => {
@@ -104,8 +115,10 @@ describe("page adapter rules", () => {
       }),
       job({ title: "Product Designer", url: "https://careers.acme.com/jobs/product-designer" }),
     ]);
+    // The next page repeats the first, which ends the listing.
     expect(scrapes).toEqual([
       { url: "https://www.acme.com/careers", selector: "main .openings", withHtml: false },
+      { url: "https://www.acme.com/careers?page=2", selector: "main .openings", withHtml: false },
     ]);
     expect(extractions).toEqual([]);
   });
@@ -214,6 +227,110 @@ describe("page adapter on an unchanged page", () => {
       _tag: "Success",
       success: { listings: [], listingHash: listingHashOf(markdown) },
     });
+  });
+});
+
+describe("page adapter pagination", () => {
+  const url = "https://globex.io/careers";
+  const page = (n: number, jobs: string) =>
+    `## Page ${n}\n\n${jobs}\n\n[‹ Previous](/careers?page=${n - 1}) [Next ›](/careers?page=${n + 1})`;
+  const pages = {
+    [`${url}?page=2`]: { markdown: page(2, "- [Data Engineer](/jobs/data-engineer)") },
+    [`${url}?page=3`]: { markdown: page(3, "- [Designer](/jobs/designer)") },
+    [`${url}?page=4`]: { markdown: page(4, "- [Recruiter](/jobs/recruiter)") },
+  };
+  const first = {
+    markdown: page(
+      1,
+      "- [Backend Engineer](/jobs/backend)\n- [Data Engineer](/jobs/data-engineer)",
+    ),
+  };
+
+  test("collects job links across the next pages up to the source's page limit", async () => {
+    const { result, scrapes } = await fetchPage(source(url), first, { pages });
+    expect(scrapes.map((scrape) => scrape.url)).toEqual([url, `${url}?page=2`, `${url}?page=3`]);
+    expect(listingsOf(result).map(({ title }) => title)).toEqual([
+      "Backend Engineer",
+      "Data Engineer",
+      "Designer",
+    ]);
+  });
+
+  test("reads only as many pages as the source allows", async () => {
+    const { scrapes } = await fetchPage(source(url, { maxPages: 1 }), first, { pages });
+    expect(scrapes).toHaveLength(1);
+  });
+
+  test("stops at the last page", async () => {
+    const last = { markdown: "- [Designer](/jobs/designer)" };
+    const { scrapes } = await fetchPage(source(url), first, {
+      pages: { ...pages, [`${url}?page=2`]: last },
+    });
+    expect(scrapes.map((scrape) => scrape.url)).toEqual([url, `${url}?page=2`]);
+  });
+
+  test("hands every page to the model and keeps links from any of them", async () => {
+    const untitled = (n: number) => ({
+      markdown: `Openings, page ${n}: [Apply](/jobs/${n}000) [Next](/careers?page=${n + 1})`,
+    });
+    const extracted = [
+      job({ title: "Backend Engineer", url: "https://globex.io/jobs/1000" }),
+      job({ title: "Designer", url: "https://globex.io/jobs/2000" }),
+    ];
+    const { result, extractions } = await fetchPage(source(url, { maxPages: 2 }), untitled(1), {
+      pages: { [`${url}?page=2`]: untitled(2) },
+      extracted,
+    });
+    expect(extractions).toEqual([
+      { url, markdown: `${untitled(1).markdown}\n\n${untitled(2).markdown}` },
+    ]);
+    expect(listingsOf(result)).toEqual(extracted);
+  });
+});
+
+describe("page adapter with Firecrawl's map", () => {
+  const url = "https://www.acme.com/careers";
+
+  test("titles the map's job links by their slugs instead of scraping", async () => {
+    const mapped = [
+      { url: "https://www.acme.com/jobs/senior-backend-engineer-123456", title: "Ignored" },
+      { url: "https://www.acme.com/jobs/senior-backend-engineer-123456/" },
+      { url: "https://www.acme.com/jobs/4012345" },
+      { url: "https://www.acme.com/about" },
+      { url: "https://careers.acme.com/jobs/data_engineer" },
+    ];
+    const { result, scrapes, maps } = await fetchPage(
+      source(url, { useMap: true }),
+      {},
+      { mapped },
+    );
+    expect(maps).toEqual([`${url} job`]);
+    expect(scrapes).toEqual([]);
+    expect(listingsOf(result)).toEqual([
+      job({
+        title: "Senior Backend Engineer",
+        url: "https://www.acme.com/jobs/senior-backend-engineer-123456",
+        company: "acme.com",
+      }),
+      job({
+        title: "Data Engineer",
+        url: "https://careers.acme.com/jobs/data_engineer",
+        company: "acme.com",
+      }),
+    ]);
+  });
+
+  test("scrapes the page when the map has no job links", async () => {
+    const markdown = await pageFixture("globex-board.md");
+    const { result, scrapes, maps, infos } = await fetchPage(
+      source(url, { useMap: true }),
+      { markdown, siteName: "Globex" },
+      { mapped: [{ url: "https://www.acme.com/about" }] },
+    );
+    expect(maps).toHaveLength(1);
+    expect(scrapes).toHaveLength(1);
+    expect(infos).toEqual([`Firecrawl's map has no job links for ${url}.`]);
+    expect(listingsOf(result)).toHaveLength(3);
   });
 });
 

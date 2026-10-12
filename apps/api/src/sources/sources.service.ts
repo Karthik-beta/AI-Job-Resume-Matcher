@@ -23,7 +23,7 @@ export class SourcesService {
     }
   }
 
-  async update(userId: string, id: string, { kind, adapterKey }: UpdateJobSource) {
+  async update(userId: string, id: string, { kind, adapterKey, useMap }: UpdateJobSource) {
     const source = await this.prisma.jobSource.findFirst({ where: { id, userId } });
     if (!source) throw new NotFoundException("Source not found");
     const [updated] = await this.prisma.$transaction([
@@ -36,9 +36,10 @@ export class SourcesService {
           suggestedKind: null,
           suggestedAdapterKey: null,
           listingHash: null,
+          ...(useMap === undefined ? {} : { useMap }),
         },
       }),
-      // Cached listings came from the previous kind.
+      // Cached listings came from the previous kind or way of reading the page.
       this.prisma.pageCache.deleteMany({
         where: { userId, url: source.url, kind: "SOURCE_LISTING" },
       }),
