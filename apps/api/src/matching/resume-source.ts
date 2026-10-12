@@ -8,7 +8,7 @@ import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
 
 export interface Resume {
   readonly text: string;
-  // sha256 hex of the PDF bytes, or of the markdown for a page Firecrawl scraped.
+  // sha256 hex of the downloaded bytes, so an unchanged file is never parsed or scraped again.
   readonly hash: string;
 }
 
@@ -68,18 +68,16 @@ export const resumeSourceLayer = Layer.effect(
             );
           }
 
-          let text: string;
-          let hash: string;
-          if (isPdf(response.body)) {
-            hash = sha256(response.body);
-            text = cached?.hash === hash ? cached.markdown : yield* pdf.parse(response.body);
-          } else {
-            // Not a PDF (a web page or a Google Doc), so Firecrawl renders it as before.
-            text = yield* firecrawl
-              .scrapeMarkdown(url)
-              .pipe(Effect.flatMap(pdfOrMarkdown), Effect.provideService(PdfParser, pdf));
-            hash = sha256(text);
-          }
+          const hash = sha256(response.body);
+          const text =
+            cached?.hash === hash
+              ? cached.markdown
+              : isPdf(response.body)
+                ? yield* pdf.parse(response.body)
+                : // Not a PDF (a web page or a Google Doc), so Firecrawl renders it as before.
+                  yield* firecrawl
+                    .scrapeMarkdown(url)
+                    .pipe(Effect.flatMap(pdfOrMarkdown), Effect.provideService(PdfParser, pdf));
           yield* store.set(
             key,
             {

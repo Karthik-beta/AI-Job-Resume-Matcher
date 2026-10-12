@@ -134,13 +134,26 @@ describe("resume source", () => {
     expect(parsed).toHaveLength(2);
   });
 
-  test("scrapes a page that is not a PDF with Firecrawl and hashes its markdown", async () => {
+  test("scrapes a page that is not a PDF only when its bytes change", async () => {
     const page = "https://example.com/about-me";
-    const { resolve, scraped, parsed } = setup([response(200, new TextEncoder().encode("<html>"))]);
+    const v1 = new TextEncoder().encode("<html>v1</html>");
+    const v2 = new TextEncoder().encode("<html>v2</html>");
+    const { resolve, scraped, parsed } = setup([
+      response(200, v1),
+      response(200, v1),
+      response(304),
+      response(200, v2),
+    ]);
     expect(await resolve(page)).toMatchObject({
-      success: { text: "# Resume page 1", hash: sha256("# Resume page 1") },
+      success: { text: "# Resume page 1", hash: sha256(v1) },
     });
+    expect(await resolve(page)).toMatchObject({ success: { text: "# Resume page 1" } });
+    expect(await resolve(page)).toMatchObject({ success: { text: "# Resume page 1" } });
     expect(scraped).toEqual([page]);
+    expect(await resolve(page)).toMatchObject({
+      success: { text: "# Resume page 2", hash: sha256(v2) },
+    });
+    expect(scraped).toEqual([page, page]);
     expect(parsed).toEqual([]);
   });
 
