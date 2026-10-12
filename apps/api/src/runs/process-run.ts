@@ -181,11 +181,19 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        const {
-          listings: found,
-          embedded,
-          listingHash,
-        } = yield* scrapeSourceListings(userId, source);
+        const read = yield* scrapeSourceListings(userId, source).pipe(Effect.result);
+        if (read._tag === "Failure") {
+          // A search that cannot run (no cloud credits in hybrid mode, or no SearXNG in local
+          // mode) skips just that source; errors that stop the run still stop it.
+          if (source.kind === "SEARCH" && !stopsRun(read.failure)) {
+            yield* Effect.logWarning(
+              `Run ${runId} skips search source ${source.id}: ${read.failure.message}`,
+            );
+            continue;
+          }
+          return yield* read.failure;
+        }
+        const { listings: found, embedded, listingHash } = read.success;
         for (const { url } of found) {
           const canonical = canonicalUrl(url);
           if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, listingKind(source.kind, url));
@@ -208,7 +216,8 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       }
       return { resume, listings: dedupeListings(listings), kindByUrl };
     }).pipe(Effect.result);
-    // Nothing can be analysed without the resume and listings, so every error here stops the run.
+    // Nothing can be analysed without the resume and listings, so every error here stops the
+    // run (except a failing search source, skipped above).
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
     const { resume, listings, kindByUrl } = prepared.success;
     const kindOf = (job: Listing) => kindByUrl.get(canonicalUrl(job.url)) ?? "PAGE";

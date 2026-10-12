@@ -66,8 +66,10 @@ describe("search sources", () => {
     expect(searchOptions).toEqual({
       includeDomains: [
         "job-boards.greenhouse.io",
+        "job-boards.eu.greenhouse.io",
         "boards.greenhouse.io",
         "jobs.lever.co",
+        "jobs.eu.lever.co",
         "jobs.ashbyhq.com",
         "jobs.smartrecruiters.com",
         "recruitee.com",

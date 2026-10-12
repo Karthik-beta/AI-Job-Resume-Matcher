@@ -30,10 +30,11 @@ export interface CreditAllowance {
   readonly periodEnd: Date;
 }
 
-// The end Firecrawl reports, or the end of the calendar month (UTC) when it reports none.
+// The end Firecrawl reports, or the end of the calendar month (UTC) when it reports none or
+// one that has already passed.
 export const periodEndOf = (usage: CreditUsage, now: number) => {
   const reported = usage.billingPeriodEnd ? Date.parse(usage.billingPeriodEnd) : Number.NaN;
-  if (!Number.isNaN(reported)) return new Date(reported);
+  if (!Number.isNaN(reported) && reported > now) return new Date(reported);
   const today = new Date(now);
   return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
 };

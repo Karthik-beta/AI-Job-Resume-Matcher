@@ -23,13 +23,16 @@ const usage = (remainingCredits: number, billingPeriodEnd: string | null): Credi
 });
 
 describe("billing period", () => {
-  test("uses the reported end, or the end of the calendar month", () => {
+  test("uses the reported end, or the end of the calendar month when none is ahead", () => {
     const now = at("2026-10-12T09:00:00Z");
     expect(periodEndOf(usage(1, "2026-10-20T00:00:00Z"), now)).toEqual(
       new Date("2026-10-20T00:00:00Z"),
     );
     expect(periodEndOf(usage(1, null), now)).toEqual(new Date("2026-11-01T00:00:00Z"));
     expect(periodEndOf(usage(1, "not a date"), now)).toEqual(new Date("2026-11-01T00:00:00Z"));
+    expect(periodEndOf(usage(1, "2026-10-01T00:00:00Z"), now)).toEqual(
+      new Date("2026-11-01T00:00:00Z"),
+    );
     expect(periodEndOf(usage(1, null), at("2026-12-31T23:00:00Z"))).toEqual(
       new Date("2027-01-01T00:00:00Z"),
     );

@@ -178,8 +178,9 @@ export const localSearchMessage =
   "(set FIRECRAWL_LOCAL_SEARCH=true)";
 
 // A search costs 2 credits per 10 results, rounded up (https://docs.firecrawl.dev/billing).
-// The SDK drops the reported creditsUsed, so the cost is counted from the results.
-export const searchCost = (results: number) => 2 * Math.ceil(results / 10);
+// The SDK drops the reported creditsUsed, so the cost is counted from the results; a search
+// with no results is counted as the minimum charge of 2, to be safe.
+export const searchCost = (results: number) => Math.max(2, 2 * Math.ceil(results / 10));
 
 // Whether a cloud request may be sent, and what each one cost. A run sets its own budget
 // (see credit-guard.ts); outside a run only the plan itself (a 402) refuses requests.

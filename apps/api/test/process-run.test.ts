@@ -9,6 +9,7 @@ import {
   NotifyFailed,
   OpenRouterAuthError,
   OpenRouterRequestFailed,
+  ScrapeFailed,
 } from "../src/matching/errors";
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
@@ -19,6 +20,7 @@ import { ResumeSource } from "../src/matching/resume-source";
 import {
   FirecrawlPlan,
   LocalFirecrawlDown,
+  localSearchMessage,
   RunCloudBudget,
   ScrapeHealth,
 } from "../src/matching/scrape-router";
@@ -117,6 +119,8 @@ describe("process run", () => {
       triage?: Record<string, number> | OpenRouterRequestFailed | OpenRouterAuthError;
       // A cloud plan with these credits; without one the run is in local mode.
       cloud?: { remainingCredits: number; billingPeriodEnd: string | null };
+      // The error every search fails with.
+      search?: ScrapeFailed | FirecrawlBlocked;
     },
   ) => {
     const triaged: string[][] = [];
@@ -170,7 +174,7 @@ describe("process run", () => {
           };
         }),
       map: () => Effect.die("unused"),
-      search: () => Effect.die("unused"),
+      search: () => (options.search ? Effect.fail(options.search) : Effect.die("unused")),
     });
     // The jobs' links carry no titles, so the model reads each page.
     const extractor = ListingExtractor.of({
@@ -727,6 +731,37 @@ describe("process run", () => {
       expect(nextDay.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
       expect(nextDay.run).toMatchObject({ status: "COMPLETED", cloudCredits: 5 });
     });
+  });
+
+  it("skips a search source that cannot run and reads the other sources", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const search = await prisma.jobSource.create({
+      data: { userId, url: "search:backend engineer", kind: "SEARCH", query: "backend engineer" },
+    });
+    try {
+      const run = await prisma.run.create({
+        data: { userId, trigger: "MANUAL", contextKey, sourceIds: [search.id, ...sourceIds] },
+      });
+      const failed = new ScrapeFailed({ status: null, message: localSearchMessage });
+      const { run: finished, evaluated } = await runWith(run.id, { search: failed });
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+      expect(finished).toMatchObject({ status: "COMPLETED", stopReason: null, found: 5 });
+      const skipped = await prisma.jobSource.findUniqueOrThrow({ where: { id: search.id } });
+      expect(skipped.lastCheckedAt).toBeNull();
+
+      // An error that stops any run still stops it.
+      const blocked = await prisma.run.create({
+        data: { userId, trigger: "MANUAL", contextKey, sourceIds: [search.id, ...sourceIds] },
+      });
+      const message = "Firecrawl credits exhausted";
+      const stopped = await runWith(blocked.id, {
+        search: new FirecrawlBlocked({ status: 402, message }),
+      });
+      expect(stopped.scraped).toEqual([]);
+      expect(stopped.run).toMatchObject({ status: "STOPPED", stopReason: message });
+    } finally {
+      await prisma.jobSource.delete({ where: { id: search.id } });
+    }
   });
 
   it("ignores a run that is no longer queued", async () => {

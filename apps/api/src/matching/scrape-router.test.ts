@@ -24,6 +24,7 @@ import {
   type RouterConfig,
   RunCloudBudget,
   ScrapeHealth,
+  searchCost,
 } from "./scrape-router";
 import { memoryScrapeRouteStore, ScrapeRouteStore } from "./scrape-routes";
 
@@ -275,6 +276,10 @@ describe("cloud mode", () => {
       ok: false,
       error: { _tag: "FirecrawlBlocked", status: 429 },
     });
+  });
+
+  test("counts a search's credits per 10 results, and an empty one as the minimum", () => {
+    expect([0, 1, 10, 11, 20].map(searchCost)).toEqual([2, 2, 2, 4, 4]);
   });
 
   test("maps a site for one credit", async () => {
