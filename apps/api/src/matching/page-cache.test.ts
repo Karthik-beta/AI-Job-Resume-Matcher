@@ -99,6 +99,15 @@ const fakeFirecrawl = (
         };
       }),
     map: () => Effect.die("unused"),
+    search: (query) =>
+      Effect.sync(() => {
+        scraped.push(`search ${query}`);
+        const url = "https://jobs.lever.co/acme/ad208490-4052-4f91-a57e-433f2d1e484b";
+        return {
+          results: [{ url, title: "Engineer", description: null }],
+          usage: { via: "cloud", credits: 2 } as const,
+        };
+      }),
   });
   return { scraped, firecrawl };
 };
@@ -168,6 +177,28 @@ describe("page cache", () => {
     });
     expect(await run(program)).toEqual([plain("Markdown 1"), plain("Markdown 1")]);
     expect(scraped).toEqual(["https://example.com/job/1"]);
+  });
+
+  test("searches a search source at most once a day", async () => {
+    const { run, scraped } = setup();
+    const source = {
+      url: "search:engineer",
+      kind: "SEARCH",
+      adapterKey: null,
+      query: "engineer",
+    } as const;
+    const program = Effect.gen(function* () {
+      const first = yield* scrapeSourceListings("alice", source);
+      yield* TestClock.adjust("23 hours");
+      yield* scrapeSourceListings("alice", source);
+      yield* TestClock.adjust("1 hour");
+      yield* scrapeSourceListings("alice", source);
+      return first.listings.map(({ url, company }) => ({ url, company }));
+    });
+    expect(await run(program)).toEqual([
+      { url: "https://jobs.lever.co/acme/ad208490-4052-4f91-a57e-433f2d1e484b", company: "acme" },
+    ]);
+    expect(scraped).toEqual(["search engineer", "search engineer"]);
   });
 
   test("caches source listings for 15 minutes", async () => {
@@ -304,6 +335,7 @@ describe("job pages for listings", () => {
     const { run, scraped, requests, rows } = setup();
     const page = await run(jobPageFor("alice", { ...job, description: "Ad text" }, "LEVER"));
     expect(page.posting).toBeNull();
+    expect(page.via).toBe("ATS");
     expect(page.markdown).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
     expect([...scraped, ...requests]).toEqual([]);
     expect(rows.size).toBe(0);
@@ -325,15 +357,20 @@ describe("job pages for listings", () => {
     ]);
     const [first, second] = await run(program);
     expect(first.markdown).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
-    expect(second).toEqual(first);
+    expect(second).toEqual({ ...first, via: "CACHE" });
+    expect(first.via).toBe("ATS");
     expect(requests).toEqual([`GET ${apiUrl}`]);
     expect(scraped).toEqual([]);
   });
 
   test("scrapes the job page when the source cannot supply the ad", async () => {
     const { run, scraped } = setup();
-    expect(await run(jobPageFor("alice", job, "PAGE"))).toEqual(plain("Markdown 1"));
+    expect(await run(jobPageFor("alice", job, "PAGE"))).toEqual({
+      ...plain("Markdown 1"),
+      via: "CLOUD",
+    });
     expect(scraped).toEqual([jobUrl]);
+    expect((await run(jobPageFor("alice", job, "PAGE"))).via).toBe("CACHE");
   });
 });
 

@@ -1,8 +1,9 @@
 import { Context, Data, Effect, Layer, Schema } from "effect";
 import { classifyScrape, type ScrapeOutcome, type ScrapeResult } from "./classify-scrape";
-import { firecrawlErrorFromStatus, ScrapeFailed } from "./errors";
+import { FirecrawlBlocked, firecrawlErrorFromStatus, ScrapeFailed } from "./errors";
 import {
   type CloudProxy,
+  type CreditUsage,
   cloudLimiter,
   Firecrawl,
   type FirecrawlError,
@@ -15,6 +16,8 @@ import {
   type ScrapeBackend,
   type ScrapedPage,
   type ScrapeUsage,
+  type SearchOptions,
+  type SearchResults,
   sdkClient,
   type Via,
 } from "./firecrawl";
@@ -23,10 +26,24 @@ import { noteLocalBlock, prefersCloud, ScrapeRouteStore } from "./scrape-routes"
 export type FirecrawlMode = "cloud" | "local" | "hybrid";
 
 export type FirecrawlConfig =
-  | { readonly mode: "cloud"; readonly apiKey: string; readonly cloudProxy: CloudProxy }
-  | { readonly mode: "local"; readonly localUrl: string }
+  | {
+      readonly mode: "cloud";
+      readonly apiKey: string;
+      readonly cloudProxy: CloudProxy;
+      readonly creditReserve: number;
+    }
+  // `localSearch`: the self-hosted instance searches through SearXNG (SEARXNG_ENDPOINT).
+  | { readonly mode: "local"; readonly localUrl: string; readonly localSearch: boolean }
   // Hybrid sends only blocked pages to the cloud, always with the "auto" proxy.
-  | { readonly mode: "hybrid"; readonly apiKey: string; readonly localUrl: string };
+  | {
+      readonly mode: "hybrid";
+      readonly apiKey: string;
+      readonly localUrl: string;
+      readonly creditReserve: number;
+    };
+
+// Credits a run leaves on the cloud plan (see credit-guard.ts).
+const defaultCreditReserve = 50;
 
 const Mode = Schema.Literals(["cloud", "local", "hybrid"]);
 const ProxyOption = Schema.Literals(["basic", "auto"]);
@@ -41,6 +58,24 @@ const isHttpUrl = (url: string) =>
 export const firecrawlModeFrom = (env: Record<string, string | undefined>): FirecrawlMode => {
   const mode = present(env["FIRECRAWL_MODE"]);
   return mode === "local" || mode === "hybrid" ? mode : "cloud";
+};
+
+// FIRECRAWL_CREDIT_RESERVE, which the fake providers read too.
+export const creditReserveFrom = (env: Record<string, string | undefined>) => {
+  const value = present(env["FIRECRAWL_CREDIT_RESERVE"]);
+  if (value === undefined) return defaultCreditReserve;
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`FIRECRAWL_CREDIT_RESERVE must be a whole number of credits, got "${value}".`);
+  }
+  return Number(value);
+};
+
+// FIRECRAWL_LOCAL_SEARCH=true says the self-hosted instance has SEARXNG_ENDPOINT set.
+export const localSearchFrom = (env: Record<string, string | undefined>) => {
+  const value = present(env["FIRECRAWL_LOCAL_SEARCH"])?.toLowerCase();
+  if (value === undefined || value === "false") return false;
+  if (value === "true") return true;
+  throw new Error(`FIRECRAWL_LOCAL_SEARCH must be true or false, got "${value}".`);
 };
 
 // Only the live providers read this, so fake runs need neither a key nor a local instance.
@@ -74,9 +109,12 @@ const checkedConfig = (
   if (localUrl !== undefined && mode !== "cloud" && !isHttpUrl(localUrl)) {
     throw new Error(`FIRECRAWL_LOCAL_URL must be an http(s) URL, got "${localUrl}".`);
   }
-  if (mode === "cloud") return { mode, apiKey: apiKey ?? "", cloudProxy };
-  if (mode === "local") return { mode, localUrl: localUrl ?? "" };
-  return { mode, apiKey: apiKey ?? "", localUrl: localUrl ?? "" };
+  if (mode === "local") {
+    return { mode, localUrl: localUrl ?? "", localSearch: localSearchFrom(env) };
+  }
+  const creditReserve = creditReserveFrom(env);
+  if (mode === "cloud") return { mode, apiKey: apiKey ?? "", cloudProxy, creditReserve };
+  return { mode, apiKey: apiKey ?? "", localUrl: localUrl ?? "", creditReserve };
 };
 
 export class LocalFirecrawlDown extends Data.TaggedError("LocalFirecrawlDown")<{
@@ -91,6 +129,17 @@ export class ScrapeHealth extends Context.Service<
 >()("ScrapeHealth") {}
 
 export const healthyScrapes = ScrapeHealth.of({ check: Effect.void });
+
+// The mode and cloud plan a run budgets its credits against (see credit-guard.ts).
+export class FirecrawlPlan extends Context.Service<
+  FirecrawlPlan,
+  {
+    readonly mode: FirecrawlMode;
+    readonly creditReserve: number;
+    // Null in local mode, which has no cloud plan.
+    readonly creditUsage: Effect.Effect<CreditUsage | null, FirecrawlError>;
+  }
+>()("FirecrawlPlan") {}
 
 const healthTimeoutMs = 3_000;
 
@@ -124,27 +173,43 @@ const cloudError = (error: FirecrawlRequestFailed): FirecrawlError =>
 
 export const needsCloudMessage = "needs cloud; credit reserve reached";
 
-// Whether a page blocked locally may go to the cloud, and what it cost when it did. The
-// credit reserve (AJM-90) hooks in here; until then only a cloud 402 refuses the page.
+export const localSearchMessage =
+  "Search sources need cloud Firecrawl or SearXNG on your self-hosted Firecrawl " +
+  "(set FIRECRAWL_LOCAL_SEARCH=true)";
+
+// A search costs 2 credits per 10 results, rounded up (https://docs.firecrawl.dev/billing).
+// The SDK drops the reported creditsUsed, so the cost is counted from the results; a search
+// with no results is counted as the minimum charge of 2, to be safe.
+export const searchCost = (results: number) => Math.max(2, 2 * Math.ceil(results / 10));
+
+// Whether a cloud request may be sent, and what each one cost. A run sets its own budget
+// (see credit-guard.ts); outside a run only the plan itself (a 402) refuses requests.
 export interface CloudBudget {
-  readonly allows: Effect.Effect<boolean>;
+  // Whether a request that costs `credits` still fits.
+  readonly allows: (credits: number) => Effect.Effect<boolean>;
   readonly spent: (credits: number) => Effect.Effect<void>;
+  // Why a cloud-mode run stops once a request no longer fits.
+  readonly refusal: Effect.Effect<string>;
 }
 
 export const unlimitedBudget: CloudBudget = {
-  allows: Effect.succeed(true),
+  allows: () => Effect.succeed(true),
   spent: () => Effect.void,
+  refusal: Effect.succeed("Firecrawl credit reserve reached"),
 };
+
+export const RunCloudBudget = Context.Reference<CloudBudget>("RunCloudBudget", {
+  defaultValue: () => unlimitedBudget,
+});
 
 export type RouterConfig =
   | { readonly mode: "cloud"; readonly cloud: ScrapeBackend; readonly cloudProxy: CloudProxy }
-  | { readonly mode: "local"; readonly local: ScrapeBackend }
+  | { readonly mode: "local"; readonly local: ScrapeBackend; readonly localSearch?: boolean }
   | {
       readonly mode: "hybrid";
       readonly cloud: ScrapeBackend;
       readonly local: ScrapeBackend;
       readonly routes: ScrapeRouteStore["Service"];
-      readonly budget?: CloudBudget;
     };
 
 // One request (a scrape or a map) that the router can send to either instance.
@@ -157,6 +222,8 @@ interface Attempt<A> {
   // The page to classify; a map has none.
   readonly page: (value: A) => ScrapedPage;
   readonly cloudCredits: (value: A) => number;
+  // The least a cloud request costs, checked against the run's budget before sending.
+  readonly minCredits: number;
 }
 
 interface Routed<A> {
@@ -196,6 +263,31 @@ const sendCloud = <A>(
       usage: { via: "cloud", credits: attempt.cloudCredits(value) },
     })),
   );
+
+// A cloud request the run's budget allows, with its cost recorded. `refused` is the error
+// when it does not fit.
+const budgetedCloud = <A>(
+  cloud: ScrapeBackend,
+  attempt: Attempt<A>,
+  proxy: CloudProxy,
+  refused: (budget: CloudBudget) => Effect.Effect<never, FirecrawlError>,
+) =>
+  Effect.gen(function* () {
+    const budget = yield* RunCloudBudget;
+    if (!(yield* budget.allows(attempt.minCredits))) return yield* refused(budget);
+    const sent = yield* sendCloud(cloud, attempt, proxy);
+    yield* budget.spent(sent.usage.credits);
+    return sent;
+  });
+
+// In cloud mode a refused request stops the run, like the plan's own 402.
+const reserveReached = (budget: CloudBudget) =>
+  Effect.flatMap(budget.refusal, (message) =>
+    Effect.fail(new FirecrawlBlocked({ status: 402, message })),
+  );
+
+const needsCloud = () =>
+  Effect.fail(new ScrapeFailed({ status: null, message: needsCloudMessage }));
 
 // The local result, judged by classifyScrape. A local instance has no credits or plan
 // limits, so none of its errors stop the run: they fail the one page.
@@ -242,23 +334,50 @@ const hybrid = <A>(
       // or failing must not send every domain to the cloud for a week.
       if (outcome === "blocked") yield* noteLocalBlock(config.routes, domain);
     }
-    const budget = config.budget ?? unlimitedBudget;
-    if (!(yield* budget.allows)) {
-      return yield* new ScrapeFailed({ status: null, message: needsCloudMessage });
-    }
     // Out of credits, the cloud refuses only the pages local cannot scrape, so the run goes on.
-    const cloud = yield* sendCloud(config.cloud, attempt, "auto").pipe(
+    const cloud = yield* budgetedCloud(config.cloud, attempt, "auto", needsCloud).pipe(
       Effect.catchIf(
         (error) => error._tag === "FirecrawlBlocked" && error.status === 402,
         () => Effect.fail(new ScrapeFailed({ status: 402, message: needsCloudMessage })),
       ),
     );
-    yield* budget.spent(cloud.usage.credits);
     const page = { page: attempt.page(cloud.value) };
     const cloudOutcome = classifyScrape(page, attempt.kind);
     if (cloudOutcome !== "ok") return yield* failureOf(page, cloudOutcome, "cloud");
     return cloud;
   });
+
+// Searches go to the cloud in cloud and hybrid modes (a local instance searches only through
+// SearXNG), within the run's budget like any other cloud request.
+const cloudSearch = (
+  cloud: ScrapeBackend,
+  query: string,
+  options: SearchOptions,
+  refused: (budget: CloudBudget) => Effect.Effect<never, FirecrawlError>,
+): Effect.Effect<SearchResults, FirecrawlError> =>
+  Effect.gen(function* () {
+    const budget = yield* RunCloudBudget;
+    if (!(yield* budget.allows(searchCost(options.limit)))) return yield* refused(budget);
+    const { results } = yield* cloud.search(query, options).pipe(Effect.mapError(cloudError));
+    const credits = searchCost(results.length);
+    yield* budget.spent(credits);
+    return { results, usage: { via: "cloud", credits } };
+  });
+
+const localSearch = (
+  config: Extract<RouterConfig, { mode: "local" }>,
+  query: string,
+  options: SearchOptions,
+): Effect.Effect<SearchResults, FirecrawlError> =>
+  config.localSearch
+    ? config.local.search(query, options).pipe(
+        Effect.map(({ results }) => ({ results, usage: { via: "local", credits: 0 } as const })),
+        Effect.mapError(
+          ({ status, message }) =>
+            new ScrapeFailed({ status, message: `Local Firecrawl: ${message}` }),
+        ),
+      )
+    : Effect.fail(new ScrapeFailed({ status: null, message: localSearchMessage }));
 
 const logUsage = (url: string, { usage }: { readonly usage: ScrapeUsage }) =>
   Effect.logDebug(`Scraped ${url} via ${usage.via} (${usage.credits} credits)`);
@@ -270,7 +389,7 @@ export const makeScrapeRouter = (config: RouterConfig) => {
       switch (config.mode) {
         // Cloud runs are judged as before: only Firecrawl's own errors fail a page.
         case "cloud":
-          return sendCloud(config.cloud, attempt, config.cloudProxy);
+          return budgetedCloud(config.cloud, attempt, config.cloudProxy, reserveReached);
         case "local":
           return localOnly(config.local, attempt);
         case "hybrid":
@@ -287,6 +406,7 @@ export const makeScrapeRouter = (config: RouterConfig) => {
         send: (backend, proxy) => backend.scrape(url, proxy ? { ...request, proxy } : request),
         page: (page) => page,
         cloudCredits,
+        minCredits: 1,
       }).pipe(Effect.map(({ value, usage }) => ({ page: value, usage }))),
     // /map costs one credit per call.
     map: (url, options) =>
@@ -295,7 +415,23 @@ export const makeScrapeRouter = (config: RouterConfig) => {
         send: (backend) => backend.map(url, options),
         page: () => ({}),
         cloudCredits: () => 1,
+        minCredits: 1,
       }).pipe(Effect.map(({ value, usage }) => ({ links: value.links, usage }))),
+    search: (query, options) => {
+      switch (config.mode) {
+        case "cloud":
+          return cloudSearch(config.cloud, query, options, reserveReached);
+        case "local":
+          return localSearch(config, query, options);
+        case "hybrid":
+          return cloudSearch(config.cloud, query, options, needsCloud).pipe(
+            Effect.catchIf(
+              (error) => error._tag === "FirecrawlBlocked" && error.status === 402,
+              () => Effect.fail(new ScrapeFailed({ status: 402, message: needsCloudMessage })),
+            ),
+          );
+      }
+    },
   });
 };
 
@@ -313,30 +449,55 @@ const localBackend = (apiUrl: string) =>
     makeBackend("local", sdkClient({ apiKey: "", apiUrl, timeoutMs: localTimeoutMs }), limiter),
   );
 
-// Firecrawl routed per FIRECRAWL_MODE, with the local instance's health check.
+// The plan a router's cloud instance, if it has one, budgets against.
+export const planOf = (router: RouterConfig, creditReserve: number) =>
+  FirecrawlPlan.of({
+    mode: router.mode,
+    creditReserve,
+    creditUsage:
+      router.mode === "local"
+        ? Effect.succeed(null)
+        : router.cloud.creditUsage.pipe(Effect.mapError(cloudError)),
+  });
+
+// The Firecrawl service and its plan, over the router's instances.
+export const routerContext = (router: RouterConfig, creditReserve: number) =>
+  Context.make(Firecrawl, makeScrapeRouter(router)).pipe(
+    Context.add(FirecrawlPlan, planOf(router, creditReserve)),
+  );
+
+const routerConfig = (config: FirecrawlConfig) =>
+  Effect.gen(function* () {
+    switch (config.mode) {
+      case "cloud":
+        return {
+          mode: "cloud",
+          cloud: yield* cloudBackend(config.apiKey),
+          cloudProxy: config.cloudProxy,
+        } satisfies RouterConfig;
+      case "local":
+        return {
+          mode: "local",
+          local: yield* localBackend(config.localUrl),
+          localSearch: config.localSearch,
+        } satisfies RouterConfig;
+      case "hybrid":
+        return {
+          mode: "hybrid",
+          cloud: yield* cloudBackend(config.apiKey),
+          local: yield* localBackend(config.localUrl),
+          routes: yield* ScrapeRouteStore,
+        } satisfies RouterConfig;
+    }
+  });
+
+// Firecrawl routed per FIRECRAWL_MODE, with its plan and the local instance's health check.
 export const firecrawlLayer = (config: FirecrawlConfig) =>
   Layer.mergeAll(
-    Layer.effect(
-      Firecrawl,
-      Effect.gen(function* () {
-        switch (config.mode) {
-          case "cloud":
-            return makeScrapeRouter({
-              mode: "cloud",
-              cloud: yield* cloudBackend(config.apiKey),
-              cloudProxy: config.cloudProxy,
-            });
-          case "local":
-            return makeScrapeRouter({ mode: "local", local: yield* localBackend(config.localUrl) });
-          case "hybrid":
-            return makeScrapeRouter({
-              mode: "hybrid",
-              cloud: yield* cloudBackend(config.apiKey),
-              local: yield* localBackend(config.localUrl),
-              routes: yield* ScrapeRouteStore,
-            });
-        }
-      }),
+    Layer.effectContext(
+      Effect.map(routerConfig(config), (router: RouterConfig) =>
+        routerContext(router, config.mode === "local" ? 0 : config.creditReserve),
+      ),
     ),
     Layer.succeed(
       ScrapeHealth,

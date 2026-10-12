@@ -21,6 +21,8 @@ export interface ListingSource {
   readonly useMap?: boolean;
   // The hash of the page source's markdown when its listings were last read.
   readonly listingHash?: string | null;
+  // A search source's query.
+  readonly query?: string | null;
 }
 
 export interface SourceListings {
@@ -43,6 +45,9 @@ export interface SourceAdapter {
   readonly fetchDescription?: (
     listing: Listing,
   ) => Effect.Effect<string, ScrapeFailed, AdapterServices>;
+  // Whether fetchDescription can read the ad at this URL (all URLs when missing); other
+  // listings are scraped.
+  readonly describes?: (url: string) => boolean;
 }
 
 export const boardKey = (source: ListingSource, label: string) =>

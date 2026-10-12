@@ -2,20 +2,34 @@ import type { SourceKind } from "@job-matcher/shared";
 import { Clock, Effect } from "effect";
 import type { JobResult, PrismaClient } from "../generated/prisma/client";
 import { contextKey as contextKeyOf } from "../matching/context-key";
+import {
+  fitJobs,
+  jobCredits,
+  makeRunCredits,
+  type RunCredits,
+  sourceCredits,
+  startOfUtcDay,
+} from "../matching/credit-guard";
 import { canonicalUrl, dedupeListings } from "../matching/dedupe";
 import { Notifier } from "../matching/discord";
 import type { HttpFetch } from "../matching/download";
-import { SaveFailed, stopsRun } from "../matching/errors";
+import { FirecrawlBlocked, SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
 import { evaluationText, isExpired, withPosting } from "../matching/job-posting";
 import type { ListingExtractor } from "../matching/listing-extractor";
-import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
+import {
+  jobPageFor,
+  type PageCacheStore,
+  type ScrapeVia,
+  scrapeSourceListings,
+} from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
-import { ScrapeHealth } from "../matching/scrape-router";
+import { FirecrawlPlan, RunCloudBudget, ScrapeHealth } from "../matching/scrape-router";
 import type { HostLimiter } from "../matching/sources/http";
+import { listingKind } from "../matching/sources/search";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
 import { requirementsOf, titleFiltersOf } from "./run-settings";
@@ -30,6 +44,7 @@ export type RunServices =
   | PdfParser
   | ResumeSource
   | ScrapeHealth
+  | FirecrawlPlan
   | MatchEvaluator
   | TitleTriage
   | Notifier;
@@ -71,14 +86,39 @@ const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
       }),
   });
 
-export const processRun = (prisma: PrismaClient, runId: string, model: string) => {
-  const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
-    query(() =>
-      prisma.run.update({
-        where: { id: runId },
-        data: { status, stopReason, finishedAt: new Date() },
+// The cloud credits the user's other scheduled runs have spent since midnight (UTC).
+const scheduledSpendToday = (prisma: PrismaClient, userId: string, runId: string) =>
+  Effect.gen(function* () {
+    const since = startOfUtcDay(yield* Clock.currentTimeMillis);
+    const { _sum } = yield* query(() =>
+      prisma.run.aggregate({
+        where: { userId, trigger: "SCHEDULED", id: { not: runId }, createdAt: { gte: since } },
+        _sum: { cloudCredits: true },
       }),
-    ).pipe(Effect.asVoid);
+    );
+    return _sum.cloudCredits ?? 0;
+  });
+
+// Every cloud request in the run is counted against its credit allowance (see credit-guard.ts).
+export const processRun = (prisma: PrismaClient, runId: string, model: string) =>
+  Effect.gen(function* () {
+    const credits = yield* makeRunCredits;
+    return yield* runWith(prisma, runId, model, credits).pipe(
+      Effect.provideService(RunCloudBudget, credits.budget),
+    );
+  });
+
+const runWith = (prisma: PrismaClient, runId: string, model: string, credits: RunCredits) => {
+  const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
+    Effect.gen(function* () {
+      const cloudCredits = yield* credits.spent;
+      yield* query(() =>
+        prisma.run.update({
+          where: { id: runId },
+          data: { status, stopReason, cloudCredits, finishedAt: new Date() },
+        }),
+      );
+    });
 
   return Effect.gen(function* () {
     // Only a queued run is claimed, so a duplicate delivery does nothing.
@@ -106,10 +146,34 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     const notifier = yield* Notifier;
     const resumeSource = yield* ResumeSource;
     const scrapeHealth = yield* ScrapeHealth;
+    const { mode } = yield* FirecrawlPlan;
+    const scheduled = run.trigger === "SCHEDULED";
 
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
       yield* scrapeHealth.check;
+      // The user's scheduled runs share one allowance per UTC day (see credit-guard.ts).
+      const spentToday = scheduled ? yield* scheduledSpendToday(prisma, userId, runId) : 0;
+      const allowance = yield* credits.start(scheduled, spentToday);
+      if (allowance) {
+        yield* query(() =>
+          prisma.run.update({
+            where: { id: runId },
+            data: { cloudCreditsAtStart: allowance.remaining },
+          }),
+        );
+      }
+      // A cloud run stops up front when even its sources would not fit.
+      if (allowance && mode === "cloud") {
+        let needed = 0;
+        for (const source of sources) needed += yield* sourceCredits(userId, source, mode);
+        if (needed > allowance.limit) {
+          return yield* new FirecrawlBlocked({
+            status: 402,
+            message: yield* credits.budget.refusal,
+          });
+        }
+      }
       const resume = yield* resumeSource.resolve(userId, resumeUrl);
       const listings: Listing[] = [];
       // As in dedupeListings, the first source to list a job page decides how its ad is read.
@@ -117,14 +181,22 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        const {
-          listings: found,
-          embedded,
-          listingHash,
-        } = yield* scrapeSourceListings(userId, source);
+        const read = yield* scrapeSourceListings(userId, source).pipe(Effect.result);
+        if (read._tag === "Failure") {
+          // A search that cannot run (no cloud credits in hybrid mode, or no SearXNG in local
+          // mode) skips just that source; errors that stop the run still stop it.
+          if (source.kind === "SEARCH" && !stopsRun(read.failure)) {
+            yield* Effect.logWarning(
+              `Run ${runId} skips search source ${source.id}: ${read.failure.message}`,
+            );
+            continue;
+          }
+          return yield* read.failure;
+        }
+        const { listings: found, embedded, listingHash } = read.success;
         for (const { url } of found) {
           const canonical = canonicalUrl(url);
-          if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, source.kind);
+          if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, listingKind(source.kind, url));
         }
         listings.push(...found);
         // A page that embeds an ATS board is offered as a switch on the sources page.
@@ -144,9 +216,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       }
       return { resume, listings: dedupeListings(listings), kindByUrl };
     }).pipe(Effect.result);
-    // Nothing can be analysed without the resume and listings, so every error here stops the run.
+    // Nothing can be analysed without the resume and listings, so every error here stops the
+    // run (except a failing search source, skipped above).
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
     const { resume, listings, kindByUrl } = prepared.success;
+    const kindOf = (job: Listing) => kindByUrl.get(canonicalUrl(job.url)) ?? "PAGE";
 
     const eligible = listings.filter(
       (listing) => acceptsJob(requirements, listing) && acceptsTitle(titleFilters, listing.title),
@@ -216,12 +290,30 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
         );
       }
     }
-    const selected = ranked.slice(0, settings.maxJobsPerRun);
+    let selected = ranked.slice(0, settings.maxJobsPerRun);
+    // A scheduled run keeps to what is left of today's share; jobs read for free always fit.
+    const left = yield* credits.left;
+    if (scheduled && left !== null) {
+      const costs: number[] = [];
+      for (const job of selected) {
+        costs.push(yield* jobCredits(userId, job, kindOf(job), mode));
+      }
+      const fitting = fitJobs(selected, costs, left);
+      if (fitting.length < selected.length) {
+        yield* Effect.logInfo(
+          `Run ${runId} checks ${fitting.length} of ${selected.length} jobs to keep to today's Firecrawl credits.`,
+        );
+      }
+      selected = fitting;
+    }
 
     for (const job of selected) {
-      const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
+      // Kept when the evaluation fails after the page was read.
+      let scrapedVia: ScrapeVia | null = null;
+      const outcome = yield* jobPageFor(userId, job, kindOf(job)).pipe(
         Effect.flatMap((page) =>
           Effect.gen(function* () {
+            scrapedVia = page.via;
             const enriched = withPosting(job, page.posting);
             if (isExpired(page.posting, yield* Clock.currentTimeMillis)) {
               return { enriched, verdict: expired };
@@ -261,7 +353,8 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       const matchSaved = saved?._tag === "Success";
       const failed = result.error !== null || saved?._tag === "Failure";
 
-      const fields = { runId, ...listing, ...result, matchSaved };
+      const fields = { runId, ...listing, ...result, matchSaved, scrapedVia };
+      const cloudCredits = yield* credits.spent;
       yield* query(() =>
         prisma.$transaction([
           prisma.jobResult.upsert({
@@ -271,7 +364,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
           }),
           prisma.run.update({
             where: { id: runId },
-            data: { checked: { increment: 1 }, failed: { increment: failed ? 1 : 0 } },
+            data: {
+              checked: { increment: 1 },
+              failed: { increment: failed ? 1 : 0 },
+              cloudCredits,
+            },
           }),
         ]),
       );

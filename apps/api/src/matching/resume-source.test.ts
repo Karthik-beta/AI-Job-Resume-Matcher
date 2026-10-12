@@ -83,6 +83,7 @@ const setup = (
             scrapeJob: () => Effect.die("unused"),
             scrapeListingPage: () => Effect.die("unused"),
             map: () => Effect.die("unused"),
+            search: () => Effect.die("unused"),
           }),
         ),
       ),

@@ -38,7 +38,9 @@ const fakeScrape = (replies: readonly Reply[]) => {
     next(url, options).pipe(
       Effect.map((page) => ({ links: (page.links ?? []).map((link) => ({ url: link })) })),
     );
-  return { calls, scrape, map };
+  const creditUsage = Effect.succeed({ remainingCredits: 500, billingPeriodEnd: null });
+  const search = () => Effect.succeed({ results: [] });
+  return { calls, scrape, map, search, creditUsage };
 };
 
 // Runs the program on a cloud instance with a test clock and fast-forwards through every sleep.
@@ -330,6 +332,28 @@ describe("SDK client", () => {
     }
   });
 
+  test("reads the plan's credits", async () => {
+    const usage = spyOn(FirecrawlClient.prototype, "getCreditUsage").mockResolvedValue({
+      remainingCredits: 420,
+      planCredits: 1000,
+    });
+    try {
+      const result = await sdkClient({ apiKey: "test-key" }).creditUsage.pipe(Effect.runPromise);
+      expect(result).toEqual({ remainingCredits: 420, billingPeriodEnd: null });
+      const backend = makeBackend("cloud", sdkClient({ apiKey: "test-key" }), {
+        waitForTurn: () => Effect.void,
+        backOff: () => Effect.void,
+      });
+      usage.mockRejectedValue(new SdkError("Unauthorized", 401));
+      expect(await backend.creditUsage.pipe(Effect.flip, Effect.runPromise)).toMatchObject({
+        _tag: "FirecrawlRequestFailed",
+        status: 401,
+      });
+    } finally {
+      usage.mockRestore();
+    }
+  });
+
   test("caps each scrape at the given timeout without auto-resume", async () => {
     const scrape = spyOn(FirecrawlClient.prototype, "scrape").mockResolvedValue({
       markdown: "# Jobs",
@@ -344,6 +368,34 @@ describe("SDK client", () => {
       );
     } finally {
       scrape.mockRestore();
+    }
+  });
+
+  test("searches the web without scraping the results", async () => {
+    const search = spyOn(FirecrawlClient.prototype, "search").mockResolvedValue({
+      web: [
+        { url: "https://jobs.lever.co/acme/1", title: "Engineer", description: "Build APIs" },
+        { url: "https://jobs.lever.co/acme/2" },
+        { markdown: "A scraped result without a URL" },
+      ],
+    });
+    try {
+      const options = { includeDomains: ["jobs.lever.co"], tbs: "qdr:w", limit: 10 };
+      const { results } = await sdkClient({ apiKey: "test-key" })
+        .search("engineer", options)
+        .pipe(Effect.runPromise);
+      expect(results).toEqual([
+        { url: "https://jobs.lever.co/acme/1", title: "Engineer", description: "Build APIs" },
+        { url: "https://jobs.lever.co/acme/2", title: null, description: null },
+      ]);
+      expect(search).toHaveBeenCalledWith("engineer", options);
+      search.mockResolvedValue({});
+      const empty = await sdkClient({ apiKey: "test-key" })
+        .search("engineer", options)
+        .pipe(Effect.runPromise);
+      expect(empty.results).toEqual([]);
+    } finally {
+      search.mockRestore();
     }
   });
 

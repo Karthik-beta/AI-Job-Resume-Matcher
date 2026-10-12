@@ -132,7 +132,9 @@ function StartForm({
               checked={selected.has(source.id)}
               onChange={(event) => toggle(source.id, event.target.checked)}
             />
-            <span className="truncate">{source.url}</span>
+            <span className="truncate">
+              {source.query === null ? source.url : `Search: ${source.query}`}
+            </span>
           </label>
         ))}
       </fieldset>

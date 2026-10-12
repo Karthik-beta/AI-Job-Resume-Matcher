@@ -86,6 +86,8 @@ describe("hybrid routing by domain", () => {
               return via === "local" ? localReply : jobPage;
             }),
           map: () => Effect.succeed({ links: [] }),
+          search: () => Effect.die("unused"),
+          creditUsage: Effect.die("unused"),
         });
         const { store, routes } = memoryScrapeRouteStore();
         const firecrawl = makeScrapeRouter({
@@ -124,6 +126,8 @@ describe("hybrid routing by domain", () => {
             : Effect.succeed(localReply);
         }),
       map: () => Effect.succeed({ links: [] }),
+      search: () => Effect.die("unused"),
+      creditUsage: Effect.die("unused"),
     });
     const { store, routes } = memoryScrapeRouteStore();
     const firecrawl = makeScrapeRouter({

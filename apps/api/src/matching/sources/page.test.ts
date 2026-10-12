@@ -69,6 +69,7 @@ const fetchPage = async (
         maps.push(`${url} ${search}`);
         return { links: options.mapped ?? [], usage: { via: "cloud", credits: 1 } as const };
       }),
+    search: () => Effect.die("unused"),
   });
   const extractor = ListingExtractor.of({
     extract: (input) =>

@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { fetchListings, fixture } from "../../../test/ats";
+import { Effect } from "effect";
+import { atsLayer, fakeHttp, fetchListings, fixture } from "../../../test/ats";
+import type { Listing } from "../firecrawl";
 import { greenhouseAdapter } from "./greenhouse";
 
 const apiUrl = "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true";
@@ -105,5 +107,48 @@ describe("Greenhouse adapter", () => {
         message: "Set the Greenhouse board name for https://job-boards.greenhouse.io/stripe.",
       },
     });
+  });
+});
+
+describe("Greenhouse job ads", () => {
+  const listing: Listing = {
+    title: "Engineer",
+    url: "https://job-boards.greenhouse.io/acme/jobs/123?gh_src=search",
+    company: "acme",
+    locations: [],
+    experienceMinYears: null,
+    experienceMaxYears: null,
+    remote: null,
+    postedAt: null,
+  };
+  const jobApi = "https://boards-api.greenhouse.io/v1/boards/acme/jobs/123?content=true";
+
+  test("reads one job's ad from the board API", async () => {
+    const job = {
+      title: "Engineer",
+      absolute_url: listing.url,
+      content: "&lt;p&gt;Build payment APIs.&lt;/p&gt;",
+    };
+    const { http, requests } = fakeHttp({ [jobApi]: JSON.stringify(job) });
+    const read = greenhouseAdapter.fetchDescription;
+    if (!read) throw new Error("Expected fetchDescription");
+    const text = await read(listing).pipe(Effect.provide(atsLayer(http)), Effect.runPromise);
+    expect(text).toBe("Build payment APIs.");
+    expect(requests).toEqual([jobApi]);
+    const other = await read({ ...listing, url: "https://stripe.com/jobs?gh_jid=1" }).pipe(
+      Effect.flip,
+      Effect.provide(atsLayer(http)),
+      Effect.runPromise,
+    );
+    expect(other.message).toBe("Not a Greenhouse job URL: https://stripe.com/jobs?gh_jid=1");
+  });
+
+  test("reads only job URLs on the board hosts", () => {
+    const describes = greenhouseAdapter.describes ?? (() => true);
+    expect(describes("https://boards.greenhouse.io/acme/jobs/9")).toBe(true);
+    expect(describes("https://job-boards.eu.greenhouse.io/acme/jobs/9")).toBe(true);
+    expect(describes("https://job-boards.greenhouse.io/acme")).toBe(false);
+    expect(describes("https://stripe.com/jobs/search?gh_jid=8172510")).toBe(false);
+    expect(describes("not a url")).toBe(false);
   });
 });

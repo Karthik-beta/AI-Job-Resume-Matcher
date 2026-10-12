@@ -81,6 +81,30 @@ export type MapSite = (
   options: MapOptions,
 ) => Effect.Effect<{ readonly links: readonly MappedLink[] }, unknown>;
 
+// A /search request: web results only, without scraping them.
+export interface SearchOptions {
+  readonly includeDomains: readonly string[];
+  // Google's time filter, e.g. "qdr:w" for the past week.
+  readonly tbs: string;
+  readonly limit: number;
+}
+
+export interface SearchResult {
+  readonly url: string;
+  readonly title: string | null;
+  readonly description: string | null;
+}
+
+export type SearchWeb = (
+  query: string,
+  options: SearchOptions,
+) => Effect.Effect<{ readonly results: readonly SearchResult[] }, unknown>;
+
+export interface SearchResults {
+  readonly results: readonly SearchResult[];
+  readonly usage: ScrapeUsage;
+}
+
 export interface MarkdownPage {
   readonly markdown: string;
   readonly usage: ScrapeUsage;
@@ -109,6 +133,12 @@ export interface SiteMap {
 
 export type FirecrawlError = FirecrawlBlocked | ScrapeFailed;
 
+// The cloud plan's credits (GET /v2/team/credit-usage); a null period end is unknown.
+export interface CreditUsage {
+  readonly remainingCredits: number;
+  readonly billingPeriodEnd: string | null;
+}
+
 // Firecrawl, wherever it runs (see scrape-router.ts for cloud, local and hybrid).
 export class Firecrawl extends Context.Service<
   Firecrawl,
@@ -122,6 +152,11 @@ export class Firecrawl extends Context.Service<
     ) => Effect.Effect<ListingPage, FirecrawlError>;
     // The site's URLs, ordered by relevance to the search; one credit per call.
     readonly map: (url: string, options: MapOptions) => Effect.Effect<SiteMap, FirecrawlError>;
+    // Web search results; 2 credits per 10 results on the cloud.
+    readonly search: (
+      query: string,
+      options: SearchOptions,
+    ) => Effect.Effect<SearchResults, FirecrawlError>;
   }
 >()("Firecrawl") {}
 
@@ -143,11 +178,19 @@ export interface ScrapeBackend {
     url: string,
     options: MapOptions,
   ) => Effect.Effect<{ readonly links: readonly MappedLink[] }, FirecrawlRequestFailed>;
+  readonly search: (
+    query: string,
+    options: SearchOptions,
+  ) => Effect.Effect<{ readonly results: readonly SearchResult[] }, FirecrawlRequestFailed>;
+  // Only the cloud has credits; a local instance never asks.
+  readonly creditUsage: Effect.Effect<CreditUsage, FirecrawlRequestFailed>;
 }
 
 export interface ScrapeClient {
   readonly scrape: ScrapePage;
   readonly map: MapSite;
+  readonly search: SearchWeb;
+  readonly creditUsage: Effect.Effect<CreditUsage, unknown>;
 }
 
 // Page chrome that holds links but no listings.
@@ -234,6 +277,10 @@ export const makeBackend = (via: Via, client: ScrapeClient, limiter: Limiter): S
     via,
     scrape: (url, request) => rateLimited(url, client.scrape(url, request)),
     map: (url, options) => rateLimited(url, client.map(url, options)),
+    // Searches share the cloud limit; locally they are spaced apart from any site's pages.
+    search: (query, options) => rateLimited("search", client.search(query, options)),
+    // The team endpoint is not a scrape, so it skips the scrape rate limit.
+    creditUsage: client.creditUsage.pipe(Effect.mapError(toRequestFailed)),
   };
 };
 
@@ -252,6 +299,10 @@ export const firecrawlFrom = (route: {
     kind: PageKind,
   ) => Effect.Effect<PageScrape, FirecrawlError>;
   readonly map: (url: string, options: MapOptions) => Effect.Effect<SiteMap, FirecrawlError>;
+  readonly search: (
+    query: string,
+    options: SearchOptions,
+  ) => Effect.Effect<SearchResults, FirecrawlError>;
 }) =>
   Firecrawl.of({
     scrapeMarkdown: (url) =>
@@ -295,6 +346,7 @@ export const firecrawlFrom = (route: {
           })),
         ),
     map: route.map,
+    search: route.search,
   });
 
 // The SDK client for one instance. Every scrape asks for the main content without ads or
@@ -333,5 +385,34 @@ export const sdkClient = (options: {
       }),
     map: (url, options) =>
       Effect.tryPromise({ try: () => client.map(url, { ...options }), catch: (cause) => cause }),
+    // Without scrapeOptions the results are not scraped, so they cost only the search.
+    search: (query, { includeDomains, tbs, limit }) =>
+      Effect.tryPromise({
+        try: () => client.search(query, { includeDomains: [...includeDomains], tbs, limit }),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.map(({ web = [] }) => ({
+          results: web.flatMap((result) =>
+            "url" in result && typeof result.url === "string"
+              ? [
+                  {
+                    url: result.url,
+                    title: ("title" in result && result.title) || null,
+                    description: ("description" in result && result.description) || null,
+                  },
+                ]
+              : [],
+          ),
+        })),
+      ),
+    creditUsage: Effect.tryPromise({
+      try: () => client.getCreditUsage(),
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.map(({ remainingCredits, billingPeriodEnd }) => ({
+        remainingCredits,
+        billingPeriodEnd: billingPeriodEnd ?? null,
+      })),
+    ),
   } satisfies ScrapeClient;
 };

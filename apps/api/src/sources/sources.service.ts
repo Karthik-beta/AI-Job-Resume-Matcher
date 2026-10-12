@@ -1,7 +1,13 @@
 import type { UpdateJobSource } from "@job-matcher/shared";
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { Prisma } from "../generated/prisma/client";
 import { detectSource } from "../matching/sources/detect";
+import { searchSourceUrl } from "../matching/sources/search";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
@@ -12,12 +18,30 @@ export class SourcesService {
     return this.prisma.jobSource.findMany({ where: { userId }, orderBy: { createdAt: "desc" } });
   }
 
-  async create(userId: string, url: string) {
+  create(userId: string, url: string) {
+    return this.added(
+      this.prisma.jobSource.create({ data: { userId, url, ...detectSource(url) } }),
+      "This source is already added",
+    );
+  }
+
+  // Stored under a synthetic URL (see searchSourceUrl), so the same query is added once.
+  createSearch(userId: string, rawQuery: string) {
+    const query = rawQuery.replace(/\s+/g, " ");
+    return this.added(
+      this.prisma.jobSource.create({
+        data: { userId, url: searchSourceUrl(query), kind: "SEARCH", query },
+      }),
+      "This search is already added",
+    );
+  }
+
+  private async added<A>(create: Promise<A>, duplicate: string) {
     try {
-      return await this.prisma.jobSource.create({ data: { userId, url, ...detectSource(url) } });
+      return await create;
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-        throw new ConflictException("This source is already added");
+        throw new ConflictException(duplicate);
       }
       throw error;
     }
@@ -26,6 +50,9 @@ export class SourcesService {
   async update(userId: string, id: string, { kind, adapterKey, useMap }: UpdateJobSource) {
     const source = await this.prisma.jobSource.findFirst({ where: { id, userId } });
     if (!source) throw new NotFoundException("Source not found");
+    if (source.kind === "SEARCH") {
+      throw new BadRequestException("A search source cannot be switched to another type");
+    }
     const [updated] = await this.prisma.$transaction([
       this.prisma.jobSource.update({
         where: { id },

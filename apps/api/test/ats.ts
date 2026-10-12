@@ -41,6 +41,7 @@ const unusedFirecrawl = Firecrawl.of({
   scrapeJob: () => Effect.die("Firecrawl is not used by ATS adapters"),
   scrapeListingPage: () => Effect.die("Firecrawl is not used by ATS adapters"),
   map: () => Effect.die("Firecrawl is not used by ATS adapters"),
+  search: () => Effect.die("Firecrawl is not used by ATS adapters"),
 });
 
 const unusedExtractor = ListingExtractor.of({

@@ -117,6 +117,30 @@ describe("job sources", () => {
     await alice.patch(`/api/sources/${source.id}`).send(body).expect(400);
   });
 
+  it("adds a search source once per query, and keeps it a search", async () => {
+    const created = await alice
+      .post("/api/sources/search")
+      .send({ query: "  Backend   Engineer " })
+      .expect(201);
+    expect(created.body).toMatchObject({
+      kind: "SEARCH",
+      query: "Backend Engineer",
+      url: "search:backend engineer",
+      adapterKey: null,
+    });
+    await alice.post("/api/sources/search").send({ query: "backend engineer" }).expect(409);
+    await alice.post("/api/sources/search").send({ query: "   " }).expect(400);
+    await alice
+      .post("/api/sources/search")
+      .send({ query: "x".repeat(201) })
+      .expect(400);
+    const switched = await alice
+      .patch(`/api/sources/${created.body.id}`)
+      .send({ kind: "PAGE", adapterKey: null })
+      .expect(400);
+    expect(switched.body.message).toBe("A search source cannot be switched to another type");
+  });
+
   it("hides sources from other users", async () => {
     const created = await alice
       .post("/api/sources")
