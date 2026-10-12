@@ -10,6 +10,7 @@ import {
   makeRunCredits,
   periodEndOf,
   sourceCredits,
+  startOfUtcDay,
 } from "./credit-guard";
 import type { CreditUsage, Listing } from "./firecrawl";
 import { type CachedPage, PageCacheStore, type PageKey } from "./page-cache";
@@ -58,6 +59,22 @@ describe("allowanceOf", () => {
     expect(allowanceOf(plan, 50, true, now).limit).toBe(40);
   });
 
+  test("gives a scheduled run what the day's earlier scheduled runs left of the share", () => {
+    expect(allowanceOf(plan, 50, true, now, 15).limit).toBe(25);
+    expect(allowanceOf(plan, 50, true, now, 40).limit).toBe(0);
+    expect(allowanceOf(plan, 50, true, now, 60).limit).toBe(0);
+    // Manual runs are not limited by the scheduled share.
+    expect(allowanceOf(plan, 50, false, now, 40).limit).toBe(400);
+    expect(limitMessage(allowanceOf(plan, 50, true, now, 40), 0)).toBe(
+      "Firecrawl daily credit allowance reached (450 left until 2026-10-22)",
+    );
+  });
+
+  test("starts the scheduled runs' day at midnight UTC", () => {
+    expect(startOfUtcDay(at("2026-10-12T23:59:59Z"))).toEqual(new Date("2026-10-12T00:00:00Z"));
+    expect(startOfUtcDay(at("2026-10-13T00:00:00Z"))).toEqual(new Date("2026-10-13T00:00:00Z"));
+  });
+
   test("allows nothing inside the reserve", () => {
     expect(allowanceOf(usage(30, null), 50, false, now)).toMatchObject({ usable: 0, limit: 0 });
   });
@@ -101,6 +118,23 @@ describe("makeRunCredits", () => {
       expect(yield* credits.budget.refusal).toBe(
         "Firecrawl daily credit allowance reached (250 left until 2026-10-17)",
       );
+    }).pipe(
+      Effect.provide(Layer.merge(TestClock.layer(), planLayer(usage(300, "2026-10-17T00:00:00Z")))),
+      Effect.runPromise,
+    ));
+
+  test("gives a scheduled run only what today's earlier scheduled runs left", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(at("2026-10-12T12:00:00Z"));
+      const credits = yield* makeRunCredits;
+      // 50 today, 45 of it already spent by earlier scheduled runs.
+      expect(yield* credits.start(true, 45)).toMatchObject({ usable: 250, limit: 5 });
+      expect(yield* credits.budget.allows(5)).toBe(true);
+      expect(yield* credits.budget.allows(6)).toBe(false);
+      // On the next day the share is whole again, and smaller with fewer days left.
+      yield* TestClock.setTime(at("2026-10-13T00:30:00Z"));
+      const tomorrow = yield* makeRunCredits;
+      expect(yield* tomorrow.start(true, 0)).toMatchObject({ limit: 62 });
     }).pipe(
       Effect.provide(Layer.merge(TestClock.layer(), planLayer(usage(300, "2026-10-17T00:00:00Z")))),
       Effect.runPromise,

@@ -602,9 +602,14 @@ describe("process run", () => {
   describe("with the credit guard", () => {
     const periodEnd = "2099-01-01T00:00:00.000Z";
     // Nothing cached, so every source and job page is scraped.
-    const fresh = async () => {
+    const uncached = async () => {
       await prisma.jobResult.deleteMany({ where: { userId } });
       await prisma.pageCache.deleteMany({ where: { userId } });
+    };
+    // Also no scheduled runs have spent today's share.
+    const fresh = async () => {
+      await uncached();
+      await prisma.run.deleteMany({ where: { userId, trigger: "SCHEDULED" } });
     };
 
     it("stops a cloud run whose sources would not fit above the reserve", async () => {
@@ -677,6 +682,50 @@ describe("process run", () => {
       });
       expect(evaluated).toEqual([]);
       expect(run).toMatchObject({ status: "COMPLETED", checked: 0 });
+    });
+
+    it("shares one daily allowance across the day's scheduled runs", async () => {
+      await fresh();
+      const end = new Date(Date.now() + 10 * dayMs - 60_000);
+      // 70 credits above the reserve over 10 days: 7 a day.
+      const cloud = { remainingCredits: 120, billingPeriodEnd: end.toISOString() };
+      const until = end.toISOString().slice(0, 10);
+
+      // Two credits for the sources and three for the jobs.
+      const first = await runWith(await startRun("SCHEDULED"), { cloud });
+      expect(first.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+      expect(first.run).toMatchObject({ status: "COMPLETED", cloudCredits: 5 });
+
+      // The second gets the 2 left: the sources fit, no job does.
+      await uncached();
+      const second = await runWith(await startRun("SCHEDULED"), { cloud });
+      expect(second.evaluated).toEqual([]);
+      expect(second.run).toMatchObject({ status: "COMPLETED", checked: 0, cloudCredits: 2 });
+
+      // A manual run's spending does not count against the scheduled share.
+      await uncached();
+      const manual = await runWith(await startRun(), { cloud });
+      expect(manual.run).toMatchObject({ status: "COMPLETED", cloudCredits: 5 });
+
+      // The third has nothing left, so its sources do not fit.
+      await uncached();
+      const third = await runWith(await startRun("SCHEDULED"), { cloud });
+      expect(third.scraped).toEqual([]);
+      expect(third.run).toMatchObject({
+        status: "STOPPED",
+        stopReason: `Firecrawl daily credit allowance reached (120 left until ${until})`,
+        cloudCredits: 0,
+      });
+
+      // On the next day (the earlier runs moved back a day) the share is whole again.
+      await prisma.run.updateMany({
+        where: { userId, trigger: "SCHEDULED" },
+        data: { createdAt: new Date(Date.now() - dayMs) },
+      });
+      await uncached();
+      const nextDay = await runWith(await startRun("SCHEDULED"), { cloud });
+      expect(nextDay.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+      expect(nextDay.run).toMatchObject({ status: "COMPLETED", cloudCredits: 5 });
     });
   });
 

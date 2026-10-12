@@ -122,8 +122,8 @@ Listings are filtered by your locations and experience, then by **title filters*
 The free cloud plan has 1,000 credits a month with no rollover, and 10 requests a minute for scrape, map and search ([billing](https://docs.firecrawl.dev/billing), [rate limits](https://docs.firecrawl.dev/rate-limits)). In `cloud` and `hybrid` mode each run reads the plan's remaining credits once and keeps `FIRECRAWL_CREDIT_RESERVE` (default 50) untouched:
 
 - A **manual** run may spend everything above the reserve.
-- A **scheduled** run gets an even share per day left in the billing period (the end of the calendar month when Firecrawl reports none), and leaves out jobs that would not fit. Jobs read from an ATS API or the cache count as free.
-- In `cloud` mode a run stops when even its sources would not fit, or once it has spent its share: "Firecrawl credit reserve reached (N left until <date>)". In `hybrid` mode the local scrapes go on, and pages that need the cloud fail with "needs cloud; credit reserve reached".
+- **Scheduled** runs share one allowance per day (UTC): an even share per day left in the billing period (the end of the calendar month when Firecrawl reports none). Each scheduled run gets what the day's earlier scheduled runs left of it, and leaves out jobs that would not fit, so a frequent schedule cannot spend the month early. Manual runs do not count against it. Jobs read from an ATS API or the cache count as free.
+- In `cloud` mode a run stops when even its sources would not fit, or once it has spent its share: "Firecrawl credit reserve reached (N left until <date>)", or "Firecrawl daily credit allowance reached (…)" for a scheduled run. In `hybrid` mode the local scrapes go on, and pages that need the cloud fail with "needs cloud; credit reserve reached".
 
 Spending is counted from each request's reported cost, with no further API calls.
 

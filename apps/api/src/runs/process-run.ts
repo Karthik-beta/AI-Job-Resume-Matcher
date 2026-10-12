@@ -8,6 +8,7 @@ import {
   makeRunCredits,
   type RunCredits,
   sourceCredits,
+  startOfUtcDay,
 } from "../matching/credit-guard";
 import { canonicalUrl, dedupeListings } from "../matching/dedupe";
 import { Notifier } from "../matching/discord";
@@ -85,6 +86,19 @@ const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
       }),
   });
 
+// The cloud credits the user's other scheduled runs have spent since midnight (UTC).
+const scheduledSpendToday = (prisma: PrismaClient, userId: string, runId: string) =>
+  Effect.gen(function* () {
+    const since = startOfUtcDay(yield* Clock.currentTimeMillis);
+    const { _sum } = yield* query(() =>
+      prisma.run.aggregate({
+        where: { userId, trigger: "SCHEDULED", id: { not: runId }, createdAt: { gte: since } },
+        _sum: { cloudCredits: true },
+      }),
+    );
+    return _sum.cloudCredits ?? 0;
+  });
+
 // Every cloud request in the run is counted against its credit allowance (see credit-guard.ts).
 export const processRun = (prisma: PrismaClient, runId: string, model: string) =>
   Effect.gen(function* () {
@@ -138,7 +152,9 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
       yield* scrapeHealth.check;
-      const allowance = yield* credits.start(scheduled);
+      // The user's scheduled runs share one allowance per UTC day (see credit-guard.ts).
+      const spentToday = scheduled ? yield* scheduledSpendToday(prisma, userId, runId) : 0;
+      const allowance = yield* credits.start(scheduled, spentToday);
       if (allowance) {
         yield* query(() =>
           prisma.run.update({
@@ -266,7 +282,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       }
     }
     let selected = ranked.slice(0, settings.maxJobsPerRun);
-    // A scheduled run keeps to its share of the credits; jobs read for free always fit.
+    // A scheduled run keeps to what is left of today's share; jobs read for free always fit.
     const left = yield* credits.left;
     if (scheduled && left !== null) {
       const costs: number[] = [];

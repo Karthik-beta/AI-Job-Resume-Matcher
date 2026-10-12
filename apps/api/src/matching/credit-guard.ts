@@ -7,15 +7,17 @@ import type { ListingSource } from "./sources/adapter";
 import { descriptionReader } from "./sources/registry";
 
 // The Firecrawl credit guard. A cloud or hybrid run reads the plan's credits once, after the
-// preflight, and may spend what is left above FIRECRAWL_CREDIT_RESERVE. A scheduled run gets
-// an even share of that per day left in the billing period, so a frequent schedule cannot
-// spend the month in a day; a manual run may use more than a day's share, never the reserve.
+// preflight, and may spend what is left above FIRECRAWL_CREDIT_RESERVE. The user's scheduled
+// runs share one allowance per UTC day, an even share of that per day left in the billing
+// period: each scheduled run gets the share less what the day's earlier scheduled runs spent,
+// so a frequent schedule cannot spend the month in a day. A manual run may use more than a
+// day's share, never the reserve, and does not count against the scheduled runs' share.
 // Every cloud request is counted from its reported usage, with no further API calls.
 
 const dayMs = 86_400_000;
 
 // A search costs 2 credits per 10 results (https://docs.firecrawl.dev/billing), and a search
-// source asks for 10.
+// source asks for 10 (see searchCost in scrape-router.ts).
 export const searchCredits = 2;
 
 export interface CreditAllowance {
@@ -23,7 +25,7 @@ export interface CreditAllowance {
   readonly remaining: number;
   // Credits above the reserve.
   readonly usable: number;
-  // What this run may spend: all of `usable`, or a scheduled run's share of it for today.
+  // What this run may spend: all of `usable`, or what is left of today's scheduled share.
   readonly limit: number;
   readonly periodEnd: Date;
 }
@@ -40,15 +42,22 @@ export const periodEndOf = (usage: CreditUsage, now: number) => {
 export const daysLeft = (periodEnd: Date, now: number) =>
   Math.max(1, Math.ceil((periodEnd.getTime() - now) / dayMs));
 
+// Midnight (UTC) at the start of the day `now` falls in: the scheduled runs' day.
+export const startOfUtcDay = (now: number) => new Date(now - (now % dayMs));
+
+// `spentToday`: the cloud credits the user's other scheduled runs spent since startOfUtcDay.
 export const allowanceOf = (
   usage: CreditUsage,
   reserve: number,
   scheduled: boolean,
   now: number,
+  spentToday = 0,
 ): CreditAllowance => {
   const periodEnd = periodEndOf(usage, now);
   const usable = Math.max(0, usage.remainingCredits - reserve);
-  const limit = scheduled ? Math.floor(usable / daysLeft(periodEnd, now)) : usable;
+  const limit = scheduled
+    ? Math.max(0, Math.floor(usable / daysLeft(periodEnd, now)) - spentToday)
+    : usable;
   return { remaining: usage.remainingCredits, usable, limit, periodEnd };
 };
 
@@ -88,8 +97,9 @@ export const makeRunCredits = Effect.gen(function* () {
     left: Effect.map(Ref.get(state), ({ allowance, spent }) =>
       allowance ? Math.max(0, allowance.limit - spent) : null,
     ),
-    // Reads the plan's credits; null in local mode.
-    start: (scheduled: boolean) =>
+    // Reads the plan's credits; null in local mode. `spentToday` is what the user's other
+    // scheduled runs spent today (see allowanceOf).
+    start: (scheduled: boolean, spentToday = 0) =>
       Effect.gen(function* () {
         const plan = yield* FirecrawlPlan;
         const usage = yield* plan.creditUsage;
@@ -99,6 +109,7 @@ export const makeRunCredits = Effect.gen(function* () {
           plan.creditReserve,
           scheduled,
           yield* Clock.currentTimeMillis,
+          spentToday,
         );
         yield* Ref.update(state, (current) => ({ ...current, allowance }));
         return allowance;
