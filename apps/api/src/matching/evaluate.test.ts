@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { OpenRouterClient } from "@effect/ai-openrouter";
 import { Clock, Context, Effect, Fiber, Layer, Logger, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -11,6 +12,7 @@ import {
   type MatchInput,
   makeMatchEvaluator,
   systemPrompt,
+  userPrompt,
 } from "./evaluate";
 import { defaultRequirements } from "./requirements";
 import { defaultRouting } from "./routing";
@@ -29,7 +31,12 @@ type Reply = { readonly status?: number; readonly body: unknown };
 
 const completion = (
   content: string | null,
-  options: { finishReason?: string; refusal?: string; serviceTier?: string | undefined } = {},
+  options: {
+    finishReason?: string;
+    refusal?: string;
+    serviceTier?: string | undefined;
+    usage?: object;
+  } = {},
 ) => ({
   id: "test-completion",
   object: "chat.completion",
@@ -37,6 +44,7 @@ const completion = (
   system_fingerprint: null,
   model,
   ...(options.serviceTier === undefined ? {} : { service_tier: options.serviceTier }),
+  ...(options.usage === undefined ? {} : { usage: options.usage }),
   choices: [
     {
       index: 0,
@@ -51,6 +59,7 @@ const evaluate = async (replies: Reply | readonly Reply[], input: Partial<MatchI
   const queue = Array.isArray(replies) ? replies : [replies];
   const sent: SentRequest[] = [];
   const warnings: string[] = [];
+  const infos: string[] = [];
   const http = HttpClient.make((request, url, _signal, fiber) =>
     Effect.gen(function* () {
       const at = yield* Clock.currentTimeMillis;
@@ -75,6 +84,7 @@ const evaluate = async (replies: Reply | readonly Reply[], input: Partial<MatchI
   );
   const logger = Logger.make(({ logLevel, message }) => {
     if (logLevel === "Warn") warnings.push([message].flat().join(" "));
+    if (logLevel === "Info") infos.push([message].flat().join(" "));
   });
   const outcome = await Effect.gen(function* () {
     const fiber = yield* Effect.forkChild(
@@ -90,7 +100,7 @@ const evaluate = async (replies: Reply | readonly Reply[], input: Partial<MatchI
     Effect.provide(TestClock.layer()),
     Effect.runPromise,
   );
-  return { outcome, sent, warnings };
+  return { outcome, sent, warnings, infos };
 };
 
 const failureOf = async (replies: Reply | readonly Reply[]) => {
@@ -178,6 +188,56 @@ describe("evaluate", () => {
     );
     expect(content).toContain("candidate must meet its stated minimum");
     expect(content).toContain("If include_unknown is false, reject");
+  });
+});
+
+describe("evaluate prompt caching", () => {
+  const requirements = { ...defaultRequirements, locations: ["Bengaluru"] };
+  const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
+
+  test("orders the prompt resume, requirements, then job page", () => {
+    const prompt = userPrompt({ resume: "RESUME", jobPage: "JOB", requirements });
+    const order = ["RESUME", "User's job search requirements", "Job Posting:\nJOB"].map((part) =>
+      prompt.indexOf(part),
+    );
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(order).not.toContain(-1);
+    expect(prompt).toEndWith("Determine if this candidate is a good fit and explain why briefly.");
+  });
+
+  test.each([
+    ["with", requirements],
+    ["without", undefined],
+  ])("keeps the prefix before the job page identical %s requirements", (_, reqs) => {
+    const prefix = (jobPage: string) => {
+      const prompt = userPrompt({ resume: "Same resume", jobPage, requirements: reqs });
+      return prompt.slice(0, prompt.indexOf(jobPage));
+    };
+    expect(prefix("First job page")).toBe(prefix("A different, longer job page"));
+    expect(prefix("First job page")).toEndWith("Job Posting:\n");
+  });
+
+  test("keys the prompt cache on the resume hash", async () => {
+    const reply = { body: completion('{"is_match":true,"reason":"Fit"}') };
+    const hashed = await evaluate(reply, { resume: "My resume" });
+    expect(hashed.sent[0]?.body["prompt_cache_key"]).toBe(sha256("My resume"));
+    const given = await evaluate(reply, { resume: "My resume", resumeHash: "stored-hash" });
+    expect(given.sent[0]?.body["prompt_cache_key"]).toBe("stored-hash");
+  });
+
+  test("logs prompt, cached and completion tokens", async () => {
+    const usage = {
+      prompt_tokens: 1200,
+      prompt_tokens_details: { cached_tokens: 1024 },
+      completion_tokens: 80,
+      total_tokens: 1280,
+    };
+    const { infos } = await evaluate({
+      body: completion('{"is_match":true,"reason":"Fit"}', { usage }),
+    });
+    expect(infos).toContain(
+      "OpenRouter usage: 1200 prompt tokens (1024 cached), 80 completion tokens",
+    );
   });
 });
 

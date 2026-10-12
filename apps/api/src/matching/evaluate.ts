@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { OpenRouterClient } from "@effect/ai-openrouter";
 import { Context, Effect, Layer, Redacted, Schedule } from "effect";
 import type * as AiError from "effect/ai/AiError";
@@ -48,6 +49,8 @@ export const matchJsonSchema = {
 
 export interface MatchInput {
   readonly resume: string;
+  // sha256 hex of the resume text, when the caller already has it.
+  readonly resumeHash?: string | undefined;
   readonly jobPage: string;
   readonly requirements?: Requirements | undefined;
 }
@@ -77,15 +80,20 @@ const requirementsJson = (requirements: Requirements) =>
     include_unknown: requirements.includeUnknown,
   });
 
+// The job page goes last, so every job in a run shares the cached prompt prefix before it.
 export const userPrompt = ({ resume, jobPage, requirements }: MatchInput) => {
-  let content = `Resume:\n${resume}\n\nJob Posting:\n${jobPage}\n\n`;
+  let content = `Resume:\n${resume}\n\n`;
   if (requirements) {
     content +=
       "User's job search requirements:\n" +
       `${requirementsJson(requirements)}\n${requirementsGuidance}\n\n`;
   }
+  content += `Job Posting:\n${jobPage}\n\n`;
   return `${content}Determine if this candidate is a good fit and explain why briefly.`;
 };
+
+const promptCacheKey = ({ resume, resumeHash }: MatchInput) =>
+  resumeHash ?? createHash("sha256").update(resume).digest("hex");
 
 // OpenRouter answers a request no endpoint can serve, such as one over max_price, with 404 or 400.
 const priceCapPattern = /price|no endpoints/i;
@@ -147,6 +155,7 @@ export const makeMatchEvaluator = (model: string, routing: Routing) =>
             },
             reasoning: { effort: routing.reasoningEffort },
             max_completion_tokens: 2000,
+            prompt_cache_key: promptCacheKey(input),
           })
           .pipe(
             Effect.provideService(FetchHttpClient.RequestInit, completionRequestInit),
@@ -171,6 +180,15 @@ export const makeMatchEvaluator = (model: string, routing: Routing) =>
               routing.serviceTier === "flex" && body.service_tier && body.service_tier !== "flex"
                 ? Effect.logWarning(
                     `OpenRouter served the evaluation on the ${body.service_tier} tier, not flex.`,
+                  )
+                : Effect.void,
+            ),
+            Effect.tap(([{ usage }]) =>
+              usage
+                ? Effect.logInfo(
+                    `OpenRouter usage: ${usage.prompt_tokens} prompt tokens ` +
+                      `(${usage.prompt_tokens_details?.cached_tokens ?? 0} cached), ` +
+                      `${usage.completion_tokens} completion tokens`,
                   )
                 : Effect.void,
             ),
