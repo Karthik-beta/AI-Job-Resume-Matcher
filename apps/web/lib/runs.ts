@@ -45,7 +45,12 @@ export type JobResult = typeof JobResult.Type;
 const RunDetail = Schema.Struct({ ...Run.fields, results: Schema.Array(JobResult) });
 export type RunDetail = typeof RunDetail.Type;
 
-const Source = Schema.Struct({ id: Schema.String, url: Schema.String });
+const Source = Schema.Struct({
+  id: Schema.String,
+  url: Schema.String,
+  // Set on search sources, which are named by their query.
+  query: Schema.NullOr(Schema.String),
+});
 export type Source = typeof Source.Type;
 
 const decodeRun = Schema.decodeUnknownSync(Run);

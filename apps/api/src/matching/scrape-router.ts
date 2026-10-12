@@ -16,6 +16,8 @@ import {
   type ScrapeBackend,
   type ScrapedPage,
   type ScrapeUsage,
+  type SearchOptions,
+  type SearchResults,
   sdkClient,
   type Via,
 } from "./firecrawl";
@@ -30,7 +32,8 @@ export type FirecrawlConfig =
       readonly cloudProxy: CloudProxy;
       readonly creditReserve: number;
     }
-  | { readonly mode: "local"; readonly localUrl: string }
+  // `localSearch`: the self-hosted instance searches through SearXNG (SEARXNG_ENDPOINT).
+  | { readonly mode: "local"; readonly localUrl: string; readonly localSearch: boolean }
   // Hybrid sends only blocked pages to the cloud, always with the "auto" proxy.
   | {
       readonly mode: "hybrid";
@@ -67,6 +70,14 @@ export const creditReserveFrom = (env: Record<string, string | undefined>) => {
   return Number(value);
 };
 
+// FIRECRAWL_LOCAL_SEARCH=true says the self-hosted instance has SEARXNG_ENDPOINT set.
+export const localSearchFrom = (env: Record<string, string | undefined>) => {
+  const value = present(env["FIRECRAWL_LOCAL_SEARCH"])?.toLowerCase();
+  if (value === undefined || value === "false") return false;
+  if (value === "true") return true;
+  throw new Error(`FIRECRAWL_LOCAL_SEARCH must be true or false, got "${value}".`);
+};
+
 // Only the live providers read this, so fake runs need neither a key nor a local instance.
 export const firecrawlConfigFrom = (env: Record<string, string | undefined>): FirecrawlConfig => {
   const mode = Schema.decodeUnknownOption(Mode)(present(env["FIRECRAWL_MODE"]) ?? "cloud");
@@ -98,7 +109,9 @@ const checkedConfig = (
   if (localUrl !== undefined && mode !== "cloud" && !isHttpUrl(localUrl)) {
     throw new Error(`FIRECRAWL_LOCAL_URL must be an http(s) URL, got "${localUrl}".`);
   }
-  if (mode === "local") return { mode, localUrl: localUrl ?? "" };
+  if (mode === "local") {
+    return { mode, localUrl: localUrl ?? "", localSearch: localSearchFrom(env) };
+  }
   const creditReserve = creditReserveFrom(env);
   if (mode === "cloud") return { mode, apiKey: apiKey ?? "", cloudProxy, creditReserve };
   return { mode, apiKey: apiKey ?? "", localUrl: localUrl ?? "", creditReserve };
@@ -160,6 +173,14 @@ const cloudError = (error: FirecrawlRequestFailed): FirecrawlError =>
 
 export const needsCloudMessage = "needs cloud; credit reserve reached";
 
+export const localSearchMessage =
+  "Search sources need cloud Firecrawl or SearXNG on your self-hosted Firecrawl " +
+  "(set FIRECRAWL_LOCAL_SEARCH=true)";
+
+// A search costs 2 credits per 10 results, rounded up (https://docs.firecrawl.dev/billing).
+// The SDK drops the reported creditsUsed, so the cost is counted from the results.
+export const searchCost = (results: number) => 2 * Math.ceil(results / 10);
+
 // Whether a cloud request may be sent, and what each one cost. A run sets its own budget
 // (see credit-guard.ts); outside a run only the plan itself (a 402) refuses requests.
 export interface CloudBudget {
@@ -182,7 +203,7 @@ export const RunCloudBudget = Context.Reference<CloudBudget>("RunCloudBudget", {
 
 export type RouterConfig =
   | { readonly mode: "cloud"; readonly cloud: ScrapeBackend; readonly cloudProxy: CloudProxy }
-  | { readonly mode: "local"; readonly local: ScrapeBackend }
+  | { readonly mode: "local"; readonly local: ScrapeBackend; readonly localSearch?: boolean }
   | {
       readonly mode: "hybrid";
       readonly cloud: ScrapeBackend;
@@ -325,6 +346,38 @@ const hybrid = <A>(
     return cloud;
   });
 
+// Searches go to the cloud in cloud and hybrid modes (a local instance searches only through
+// SearXNG), within the run's budget like any other cloud request.
+const cloudSearch = (
+  cloud: ScrapeBackend,
+  query: string,
+  options: SearchOptions,
+  refused: (budget: CloudBudget) => Effect.Effect<never, FirecrawlError>,
+): Effect.Effect<SearchResults, FirecrawlError> =>
+  Effect.gen(function* () {
+    const budget = yield* RunCloudBudget;
+    if (!(yield* budget.allows(searchCost(options.limit)))) return yield* refused(budget);
+    const { results } = yield* cloud.search(query, options).pipe(Effect.mapError(cloudError));
+    const credits = searchCost(results.length);
+    yield* budget.spent(credits);
+    return { results, usage: { via: "cloud", credits } };
+  });
+
+const localSearch = (
+  config: Extract<RouterConfig, { mode: "local" }>,
+  query: string,
+  options: SearchOptions,
+): Effect.Effect<SearchResults, FirecrawlError> =>
+  config.localSearch
+    ? config.local.search(query, options).pipe(
+        Effect.map(({ results }) => ({ results, usage: { via: "local", credits: 0 } as const })),
+        Effect.mapError(
+          ({ status, message }) =>
+            new ScrapeFailed({ status, message: `Local Firecrawl: ${message}` }),
+        ),
+      )
+    : Effect.fail(new ScrapeFailed({ status: null, message: localSearchMessage }));
+
 const logUsage = (url: string, { usage }: { readonly usage: ScrapeUsage }) =>
   Effect.logDebug(`Scraped ${url} via ${usage.via} (${usage.credits} credits)`);
 
@@ -363,6 +416,21 @@ export const makeScrapeRouter = (config: RouterConfig) => {
         cloudCredits: () => 1,
         minCredits: 1,
       }).pipe(Effect.map(({ value, usage }) => ({ links: value.links, usage }))),
+    search: (query, options) => {
+      switch (config.mode) {
+        case "cloud":
+          return cloudSearch(config.cloud, query, options, reserveReached);
+        case "local":
+          return localSearch(config, query, options);
+        case "hybrid":
+          return cloudSearch(config.cloud, query, options, needsCloud).pipe(
+            Effect.catchIf(
+              (error) => error._tag === "FirecrawlBlocked" && error.status === 402,
+              () => Effect.fail(new ScrapeFailed({ status: 402, message: needsCloudMessage })),
+            ),
+          );
+      }
+    },
   });
 };
 
@@ -410,6 +478,7 @@ const routerConfig = (config: FirecrawlConfig) =>
         return {
           mode: "local",
           local: yield* localBackend(config.localUrl),
+          localSearch: config.localSearch,
         } satisfies RouterConfig;
       case "hybrid":
         return {

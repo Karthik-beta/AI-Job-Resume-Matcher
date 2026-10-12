@@ -4,7 +4,7 @@ import type { CreditUsage, Listing } from "./firecrawl";
 import { isCached } from "./page-cache";
 import { type CloudBudget, type FirecrawlMode, FirecrawlPlan } from "./scrape-router";
 import type { ListingSource } from "./sources/adapter";
-import { adapterFor } from "./sources/registry";
+import { descriptionReader } from "./sources/registry";
 
 // The Firecrawl credit guard. A cloud or hybrid run reads the plan's credits once, after the
 // preflight, and may spend what is left above FIRECRAWL_CREDIT_RESERVE. A scheduled run gets
@@ -136,7 +136,7 @@ export const jobCredits = (
 ) =>
   Effect.gen(function* () {
     if (mode !== "cloud" || listing.description !== undefined) return 0;
-    if (adapterFor(kind).fetchDescription) return 0;
+    if (descriptionReader(kind, listing.url)) return 0;
     const cached = yield* isCached({ userId, url: listing.url, kind: "JOB_PAGE" });
     return cached ? 0 : 1;
   });

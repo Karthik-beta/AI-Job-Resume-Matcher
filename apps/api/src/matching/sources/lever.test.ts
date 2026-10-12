@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { fetchListings, fixture } from "../../../test/ats";
+import { Effect } from "effect";
+import { atsLayer, fakeHttp, fetchListings, fixture } from "../../../test/ats";
+import type { Listing } from "../firecrawl";
 import { leverAdapter } from "./lever";
 
 const apiUrl = "https://api.lever.co/v0/postings/leverdemo?mode=json";
@@ -84,5 +86,50 @@ describe("Lever adapter", () => {
       _tag: "Failure",
       failure: { message: "Lever board 'leverdemo' not found." },
     });
+  });
+});
+
+describe("Lever job ads", () => {
+  const id = "ad208490-4052-4f91-a57e-433f2d1e484b";
+  const listing: Listing = {
+    title: "Engineer",
+    url: `https://jobs.eu.lever.co/acme/${id}/apply`,
+    company: "acme",
+    locations: [],
+    experienceMinYears: null,
+    experienceMaxYears: null,
+    remote: null,
+    postedAt: null,
+  };
+  const postingApi = `https://api.eu.lever.co/v0/postings/acme/${id}`;
+
+  test("reads one posting's ad from the postings API", async () => {
+    const posting = {
+      text: "Engineer",
+      hostedUrl: listing.url,
+      descriptionPlain: "Build payment APIs.",
+      lists: [{ text: "You have", content: "<li>TypeScript</li>" }],
+    };
+    const { http, requests } = fakeHttp({ [postingApi]: JSON.stringify(posting) });
+    const read = leverAdapter.fetchDescription;
+    if (!read) throw new Error("Expected fetchDescription");
+    const text = await read(listing).pipe(Effect.provide(atsLayer(http)), Effect.runPromise);
+    expect(text).toStartWith("Build payment APIs.\n\nYou have\n");
+    expect(text).toContain("TypeScript");
+    expect(requests).toEqual([postingApi]);
+    const other = await read({ ...listing, url: "https://jobs.lever.co/acme" }).pipe(
+      Effect.flip,
+      Effect.provide(atsLayer(http)),
+      Effect.runPromise,
+    );
+    expect(other.message).toBe("Not a Lever job URL: https://jobs.lever.co/acme");
+  });
+
+  test("reads only posting URLs on the board hosts", () => {
+    const describes = leverAdapter.describes ?? (() => true);
+    expect(describes(`https://jobs.lever.co/acme/${id}`)).toBe(true);
+    expect(describes("https://jobs.lever.co/acme")).toBe(false);
+    expect(describes(`https://example.com/acme/${id}`)).toBe(false);
+    expect(describes("not a url")).toBe(false);
   });
 });

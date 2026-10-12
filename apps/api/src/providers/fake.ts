@@ -16,6 +16,7 @@ import {
   type ScrapeBackend,
   type ScrapedPage,
   type ScrapeRequest,
+  type SearchResult,
   type Via,
 } from "../matching/firecrawl";
 import { ListingExtractor } from "../matching/listing-extractor";
@@ -26,6 +27,7 @@ import {
   type FirecrawlMode,
   firecrawlModeFrom,
   healthyScrapes,
+  localSearchFrom,
   type RouterConfig,
   routerContext,
   ScrapeHealth,
@@ -97,6 +99,12 @@ export interface FakeCredits {
 }
 
 const dayMs = 86_400_000;
+
+// Every search finds the fixture job pages, as a search of ATS hosts would find job ads.
+const searchResults: readonly SearchResult[] = [
+  { url: "https://jobs.example.com/backend-payments", title: "Backend Engineer, Payments" },
+  { url: "https://jobs.example.com/full-stack", title: "Full Stack Developer" },
+].map((result) => ({ ...result, description: null }));
 const defaultCredits: FakeCredits = { remainingCredits: 1_000, periodDaysLeft: 20 };
 
 // Both instances serve the fixtures, except that `?fake-blocked` pages block the local one
@@ -109,6 +117,7 @@ const fakeBackend = (via: Via, credits: FakeCredits = defaultCredits): ScrapeBac
       ? Effect.succeed(challengePage)
       : fixturePage(url, request),
   map: (url) => fixturePage(url, { formats: [] }).pipe(Effect.as({ links: [] })),
+  search: () => Effect.succeed({ results: searchResults }),
   creditUsage: Effect.map(Clock.currentTimeMillis, (now) => ({
     remainingCredits: credits.remainingCredits,
     billingPeriodEnd:
@@ -123,7 +132,7 @@ const fakeRouterConfig = (mode: FirecrawlMode, credits?: FakeCredits): RouterCon
     case "cloud":
       return { mode, cloud: fakeBackend("cloud", credits), cloudProxy: "basic" };
     case "local":
-      return { mode, local: fakeBackend("local") };
+      return { mode, local: fakeBackend("local"), localSearch: localSearchFrom(process.env) };
     case "hybrid":
       return {
         mode,

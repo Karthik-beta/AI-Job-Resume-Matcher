@@ -55,6 +55,12 @@ services:
       MAX_CONCURRENT_JOBS: 5
       BROWSER_POOL_SIZE: 5
       HARNESS_STARTUP_TIMEOUT_MS: 60000
+      # Optional: a SearXNG instance for search sources in local mode (then set
+      # FIRECRAWL_LOCAL_SEARCH=true for the app). Empty values count as unset; Firecrawl then
+      # falls back to scraping DuckDuckGo, which the app does not rely on.
+      SEARXNG_ENDPOINT: ${SEARXNG_ENDPOINT:-}
+      SEARXNG_ENGINES: ${SEARXNG_ENGINES:-}
+      SEARXNG_CATEGORIES: ${SEARXNG_CATEGORIES:-}
     ports:
       - "3002:3002"
     ulimits:

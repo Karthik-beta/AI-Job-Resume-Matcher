@@ -7,9 +7,11 @@ import { JobPage, parseJobPosting } from "./job-posting";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
 import { type ListingSource, listingPage } from "./sources/adapter";
 import type { DetectedSource } from "./sources/detect";
-import { adapterFor } from "./sources/registry";
+import { adapterFor, descriptionReader } from "./sources/registry";
 
 const listingsTtl = Duration.minutes(15);
+// A search costs credits and finds the past week's ads, so it runs at most once a day.
+const searchListingsTtl = Duration.hours(24);
 
 export interface PageKey {
   readonly userId: string;
@@ -157,7 +159,7 @@ export const scrapeSourceListings = (userId: string, source: ListingSource) =>
     const listings = yield* cached(
       { userId, url: source.url, kind: "SOURCE_LISTING" },
       decodeListings,
-      listingsTtl,
+      source.kind === "SEARCH" ? searchListingsTtl : listingsTtl,
       (previous) =>
         adapterFor(source.kind)
           .fetchListings(source, previous)
@@ -184,7 +186,7 @@ export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =
       const markdown = withDescription(listing, listing.description);
       return { markdown, posting: null, via: "ATS" as ScrapeVia | null };
     }
-    const { fetchDescription } = adapterFor(kind);
+    const fetchDescription = descriptionReader(kind, listing.url);
     // Left as CACHE when the cache answers without reading anything.
     const read: ReadVia = { via: "CACHE" };
     const page = fetchDescription

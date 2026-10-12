@@ -2,6 +2,7 @@
 
 import {
   CreateJobSource,
+  CreateSearchSource,
   SourceKind,
   sourceKindLabels,
   UpdateJobSource,
@@ -10,7 +11,7 @@ import { Option, Schema } from "effect";
 import { type SubmitEvent, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
@@ -24,6 +25,7 @@ const Source = Schema.Struct({
   suggestedKind: Schema.NullOr(SourceKind),
   suggestedAdapterKey: Schema.NullOr(Schema.String),
   useMap: Schema.Boolean,
+  query: Schema.NullOr(Schema.String),
 });
 type Source = typeof Source.Type;
 
@@ -111,6 +113,7 @@ export function JobSources() {
           {error && <FieldError>{error}</FieldError>}
         </Field>
       </form>
+      <SearchForm onAdded={(created) => setSources((current) => [created, ...(current ?? [])])} />
       {sources !== null &&
         (sources.length === 0 ? (
           <p className="text-muted-foreground">
@@ -129,6 +132,61 @@ export function JobSources() {
           </ul>
         ))}
     </section>
+  );
+}
+
+// A web search of the ATS job boards for the past week's ads, run at most once a day.
+function SearchForm({ onAdded }: { onAdded: (source: Source) => void }) {
+  const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const { value, errors } = validate(CreateSearchSource, { query });
+    if (!value) {
+      setError(errors["query"] ?? "Enter what to search for");
+      return;
+    }
+    setError(null);
+    setPending(true);
+    try {
+      const created = await api("/sources/search", {
+        method: "POST",
+        body: JSON.stringify(value),
+      });
+      if (isSource(created)) onAdded(created);
+      setQuery("");
+    } catch (caught) {
+      setError(caught instanceof ApiError ? caught.message : "Could not add the search.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-2">
+      <Field data-invalid={error !== null}>
+        <FieldLabel htmlFor="source-query">Search job boards</FieldLabel>
+        <div className="flex gap-2">
+          <Input
+            id="source-query"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="backend engineer typescript"
+            aria-invalid={error !== null}
+          />
+          <Button type="submit" variant="outline" disabled={pending}>
+            Add search
+          </Button>
+        </div>
+        <FieldDescription>
+          Finds the past week's ads on Greenhouse, Lever, Ashby, SmartRecruiters and Recruitee
+          boards. Runs at most once a day, for 2 Firecrawl credits.
+        </FieldDescription>
+        {error && <FieldError>{error}</FieldError>}
+      </Field>
+    </form>
   );
 }
 
@@ -207,12 +265,14 @@ function SourceRow({
             {source.adapterKey ? `: ${source.adapterKey}` : ""}
           </Badge>
           {source.kind === "PAGE" && source.useMap && <Badge variant="outline">Site map</Badge>}
-          <span className="truncate">{source.url}</span>
+          <span className="truncate">{source.query ?? source.url}</span>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="outline" size="sm" onClick={toggleEditing}>
-            {editing ? "Cancel" : "Change type"}
-          </Button>
+          {source.kind !== "SEARCH" && (
+            <Button variant="outline" size="sm" onClick={toggleEditing}>
+              {editing ? "Cancel" : "Change type"}
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={onRemove}>
             Delete
           </Button>

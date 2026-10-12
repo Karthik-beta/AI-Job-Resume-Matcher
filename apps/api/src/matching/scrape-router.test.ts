@@ -17,6 +17,7 @@ import {
   firecrawlConfigFrom,
   firecrawlLayer,
   firecrawlModeFrom,
+  localSearchMessage,
   makeScrapeRouter,
   needsCloudMessage,
   planOf,
@@ -29,6 +30,14 @@ import { memoryScrapeRouteStore, ScrapeRouteStore } from "./scrape-routes";
 type Reply = ScrapedPage | FirecrawlRequestFailed;
 
 const jobText = `# Backend Engineer\n\n${"Build payment APIs in TypeScript. ".repeat(20)}`;
+
+const searchResults = Array.from({ length: 12 }, (_, index) => ({
+  url: `https://jobs.lever.co/acme/${index}`,
+  title: `Job ${index}`,
+  description: null,
+}));
+
+const searchOptions = { includeDomains: ["jobs.lever.co"], tbs: "qdr:w", limit: 10 };
 
 // A budget that allows the given number of requests and records what was spent.
 const budgetOf = (requests: number) => {
@@ -43,7 +52,7 @@ const budgetOf = (requests: number) => {
 
 // Serves each URL's scripted reply, or a normal job page, and records the requests.
 const fakeBackend = (via: Via, replies: Record<string, Reply> = {}) => {
-  const calls: { url: string; request: ScrapeRequest | "map" }[] = [];
+  const calls: { url: string; request: ScrapeRequest | "map" | "search" }[] = [];
   const reply = (url: string) => {
     const scripted = replies[url];
     return scripted instanceof FirecrawlRequestFailed
@@ -56,6 +65,15 @@ const fakeBackend = (via: Via, replies: Record<string, Reply> = {}) => {
       Effect.suspend(() => {
         calls.push({ url, request });
         return reply(url);
+      }),
+    // A search finds 12 results, or fails with the reply scripted for its query.
+    search: (query) =>
+      Effect.suspend(() => {
+        calls.push({ url: query, request: "search" });
+        const scripted = replies[query];
+        return scripted instanceof FirecrawlRequestFailed
+          ? Effect.fail(scripted)
+          : Effect.succeed({ results: searchResults });
       }),
     map: (url) =>
       Effect.suspend(() => {
@@ -109,7 +127,7 @@ describe("firecrawlConfigFrom", () => {
         FIRECRAWL_MODE: "local",
         FIRECRAWL_LOCAL_URL: "http://localhost:3002/",
       }),
-    ).toEqual({ mode: "local", localUrl: "http://localhost:3002" });
+    ).toEqual({ mode: "local", localUrl: "http://localhost:3002", localSearch: false });
     expect(
       firecrawlConfigFrom({
         FIRECRAWL_MODE: "hybrid",
@@ -123,6 +141,19 @@ describe("firecrawlConfigFrom", () => {
       localUrl: "http://localhost:3002",
       creditReserve: 100,
     });
+  });
+
+  test("reads whether the local instance can search", () => {
+    const env = { FIRECRAWL_MODE: "local", FIRECRAWL_LOCAL_URL: "http://localhost:3002" };
+    expect(firecrawlConfigFrom({ ...env, FIRECRAWL_LOCAL_SEARCH: "TRUE" })).toMatchObject({
+      localSearch: true,
+    });
+    expect(firecrawlConfigFrom({ ...env, FIRECRAWL_LOCAL_SEARCH: "false" })).toMatchObject({
+      localSearch: false,
+    });
+    expect(() => firecrawlConfigFrom({ ...env, FIRECRAWL_LOCAL_SEARCH: "yes" })).toThrow(
+      'FIRECRAWL_LOCAL_SEARCH must be true or false, got "yes".',
+    );
   });
 
   test("reads the credit reserve", () => {
@@ -223,6 +254,29 @@ describe("cloud mode", () => {
     expect(spent).toEqual([1]);
   });
 
+  test("searches for 2 credits per 10 results, within the budget", async () => {
+    const { firecrawl, cloud } = router();
+    const { budget, spent } = budgetOf(1);
+    const search = firecrawl
+      .search("engineer", searchOptions)
+      .pipe(Effect.provideService(RunCloudBudget, budget));
+    expect(await run(search)).toMatchObject({
+      ok: true,
+      value: { results: searchResults, usage: { via: "cloud", credits: 4 } },
+    });
+    expect(spent).toEqual([4]);
+    expect(await run(search)).toMatchObject({
+      ok: false,
+      error: { _tag: "FirecrawlBlocked", status: 402 },
+    });
+    expect(cloud.calls).toEqual([{ url: "engineer", request: "search" }]);
+    const blocked = router({ engineer: failure(429) });
+    expect(await run(blocked.firecrawl.search("engineer", searchOptions))).toMatchObject({
+      ok: false,
+      error: { _tag: "FirecrawlBlocked", status: 429 },
+    });
+  });
+
   test("maps a site for one credit", async () => {
     const { firecrawl } = router();
     expect(await run(firecrawl.map("https://acme.com", { search: "job", limit: 5 }))).toEqual({
@@ -274,6 +328,24 @@ describe("local mode", () => {
     expect(await run(firecrawl.scrapeJob(url))).toEqual({
       ok: false,
       error: new ScrapeFailed({ status, message }),
+    });
+  });
+
+  test("searches only through SearXNG on the local instance", async () => {
+    const { firecrawl } = router();
+    expect(await run(firecrawl.search("engineer", searchOptions))).toEqual({
+      ok: false,
+      error: new ScrapeFailed({ status: null, message: localSearchMessage }),
+    });
+    const local = fakeBackend("local", { broken: failure(500, "No search engine") });
+    const searching = makeScrapeRouter({ mode: "local", local: local.backend, localSearch: true });
+    expect(await run(searching.search("engineer", searchOptions))).toMatchObject({
+      ok: true,
+      value: { usage: { via: "local", credits: 0 } },
+    });
+    expect(await run(searching.search("broken", searchOptions))).toEqual({
+      ok: false,
+      error: new ScrapeFailed({ status: 500, message: "Local Firecrawl: No search engine" }),
     });
   });
 
@@ -374,6 +446,27 @@ describe("hybrid mode", () => {
     expect(one.spent).toEqual([1]);
   });
 
+  test("searches on the cloud, failing just the source when credits run out", async () => {
+    const { firecrawl, local } = router();
+    expect(await run(firecrawl.search("engineer", searchOptions))).toMatchObject({
+      ok: true,
+      value: { usage: { via: "cloud", credits: 4 } },
+    });
+    expect(local.calls).toEqual([]);
+    const refused = firecrawl
+      .search("engineer", searchOptions)
+      .pipe(Effect.provideService(RunCloudBudget, budgetOf(0).budget));
+    expect(await run(refused)).toEqual({
+      ok: false,
+      error: new ScrapeFailed({ status: null, message: needsCloudMessage }),
+    });
+    const empty = router({}, { engineer: failure(402) });
+    expect(await run(empty.firecrawl.search("engineer", searchOptions))).toEqual({
+      ok: false,
+      error: new ScrapeFailed({ status: 402, message: needsCloudMessage }),
+    });
+  });
+
   test("maps on the cloud only when the local map is blocked", async () => {
     const blocked = router({ "https://acme.com": failure(null) });
     const result = await run(
@@ -448,7 +541,9 @@ describe("firecrawlLayer", () => {
     expect(await health(cloud)).toMatchObject({ ok: true });
     const localUrl = "http://127.0.0.1:9";
     const message = `Local Firecrawl is not running at ${localUrl}`;
-    expect(await health(firecrawlLayer({ mode: "local", localUrl }))).toMatchObject({
+    expect(
+      await health(firecrawlLayer({ mode: "local", localUrl, localSearch: false })),
+    ).toMatchObject({
       ok: false,
       error: { message },
     });
@@ -464,7 +559,9 @@ describe("firecrawlLayer", () => {
       Effect.gen(function* () {
         return yield* FirecrawlPlan;
       }).pipe(
-        Effect.provide(firecrawlLayer({ mode: "local", localUrl: "http://127.0.0.1:9" })),
+        Effect.provide(
+          firecrawlLayer({ mode: "local", localUrl: "http://127.0.0.1:9", localSearch: false }),
+        ),
         Effect.provideService(ScrapeRouteStore, memoryScrapeRouteStore().store),
       ),
     );

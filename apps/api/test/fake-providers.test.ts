@@ -2,8 +2,10 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { Firecrawl } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
+import { FirecrawlPlan, localSearchMessage } from "../src/matching/scrape-router";
 import { PrismaService } from "../src/prisma/prisma.service";
 import {
+  type FakeCredits,
   fakeEvaluator,
   fakeFirecrawlLayer,
   fakeHttpFetch,
@@ -82,6 +84,58 @@ describe("fake providers", () => {
         ? { _tag: "Failure", failure: { _tag: "ScrapeFailed", status: 403 } }
         : { _tag: "Success", success: { usage: { via: "cloud", credits: 1 } } },
     );
+  });
+
+  it("runs a search source over the fake search results", async () => {
+    const source = await prisma.jobSource.create({
+      data: { userId, url: "search:engineer", kind: "SEARCH", query: "engineer" },
+    });
+    const created = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey: "search", sourceIds: [source.id] },
+    });
+    await Effect.runPromise(
+      processRun(prisma, created.id, "test/model").pipe(Effect.provide(layer)),
+    );
+    const run = await prisma.run.findUniqueOrThrow({
+      where: { id: created.id },
+      include: { results: true },
+    });
+    expect(run).toMatchObject({ status: "COMPLETED", found: 2, cloudCreditsAtStart: 1000 });
+    // The search's 2 credits, and any job page not cached yet.
+    expect(run.cloudCredits).toBeGreaterThanOrEqual(2);
+    expect(run.results.map(({ jobUrl }) => jobUrl).sort()).toEqual([
+      "https://jobs.example.com/backend-payments",
+      "https://jobs.example.com/full-stack",
+    ]);
+  });
+
+  it("searches only on the cloud unless the local instance has SearXNG", async () => {
+    const search = (layer: Layer.Layer<Firecrawl>) =>
+      Firecrawl.use((firecrawl) =>
+        firecrawl.search("engineer", { includeDomains: [], tbs: "qdr:w", limit: 10 }),
+      ).pipe(Effect.provide(layer), Effect.result, Effect.runPromise);
+    expect(await search(fakeFirecrawlLayer("local"))).toMatchObject({
+      _tag: "Failure",
+      failure: { message: localSearchMessage },
+    });
+    expect(await search(fakeFirecrawlLayer("hybrid"))).toMatchObject({
+      _tag: "Success",
+      success: { usage: { via: "cloud", credits: 2 } },
+    });
+  });
+
+  it("reports the configured cloud credits", async () => {
+    const plan = (credits: FakeCredits) =>
+      FirecrawlPlan.use((firecrawlPlan) => firecrawlPlan.creditUsage).pipe(
+        Effect.provide(fakeFirecrawlLayer("cloud", { credits, creditReserve: 10 })),
+        Effect.runPromise,
+      );
+    expect(await plan({ remainingCredits: 42, periodDaysLeft: null })).toEqual({
+      remainingCredits: 42,
+      billingPeriodEnd: null,
+    });
+    const usage = await plan({ remainingCredits: 42, periodDaysLeft: 20 });
+    expect(Date.parse(usage?.billingPeriodEnd ?? "") - Date.now()).toBeGreaterThan(19 * 86_400_000);
   });
 
   it("blocks requests to real providers", async () => {

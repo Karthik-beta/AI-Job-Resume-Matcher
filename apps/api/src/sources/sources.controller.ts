@@ -1,4 +1,4 @@
-import { CreateJobSource, UpdateJobSource } from "@job-matcher/shared";
+import { CreateJobSource, CreateSearchSource, UpdateJobSource } from "@job-matcher/shared";
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post } from "@nestjs/common";
 import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
 import { SchemaPipe } from "../common/schema.pipe";
@@ -19,6 +19,14 @@ export class SourcesController {
     @Body(new SchemaPipe(CreateJobSource)) body: CreateJobSource,
   ) {
     return this.sources.create(session.user.id, body.url);
+  }
+
+  @Post("search")
+  createSearch(
+    @Session() session: UserSession,
+    @Body(new SchemaPipe(CreateSearchSource)) body: CreateSearchSource,
+  ) {
+    return this.sources.createSearch(session.user.id, body.query);
   }
 
   @Patch(":id")

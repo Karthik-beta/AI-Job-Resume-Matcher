@@ -39,7 +39,8 @@ const fakeScrape = (replies: readonly Reply[]) => {
       Effect.map((page) => ({ links: (page.links ?? []).map((link) => ({ url: link })) })),
     );
   const creditUsage = Effect.succeed({ remainingCredits: 500, billingPeriodEnd: null });
-  return { calls, scrape, map, creditUsage };
+  const search = () => Effect.succeed({ results: [] });
+  return { calls, scrape, map, search, creditUsage };
 };
 
 // Runs the program on a cloud instance with a test clock and fast-forwards through every sleep.
@@ -367,6 +368,34 @@ describe("SDK client", () => {
       );
     } finally {
       scrape.mockRestore();
+    }
+  });
+
+  test("searches the web without scraping the results", async () => {
+    const search = spyOn(FirecrawlClient.prototype, "search").mockResolvedValue({
+      web: [
+        { url: "https://jobs.lever.co/acme/1", title: "Engineer", description: "Build APIs" },
+        { url: "https://jobs.lever.co/acme/2" },
+        { markdown: "A scraped result without a URL" },
+      ],
+    });
+    try {
+      const options = { includeDomains: ["jobs.lever.co"], tbs: "qdr:w", limit: 10 };
+      const { results } = await sdkClient({ apiKey: "test-key" })
+        .search("engineer", options)
+        .pipe(Effect.runPromise);
+      expect(results).toEqual([
+        { url: "https://jobs.lever.co/acme/1", title: "Engineer", description: "Build APIs" },
+        { url: "https://jobs.lever.co/acme/2", title: null, description: null },
+      ]);
+      expect(search).toHaveBeenCalledWith("engineer", options);
+      search.mockResolvedValue({});
+      const empty = await sdkClient({ apiKey: "test-key" })
+        .search("engineer", options)
+        .pipe(Effect.runPromise);
+      expect(empty.results).toEqual([]);
+    } finally {
+      search.mockRestore();
     }
   });
 

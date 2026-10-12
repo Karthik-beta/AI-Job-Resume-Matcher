@@ -99,6 +99,15 @@ const fakeFirecrawl = (
         };
       }),
     map: () => Effect.die("unused"),
+    search: (query) =>
+      Effect.sync(() => {
+        scraped.push(`search ${query}`);
+        const url = "https://jobs.lever.co/acme/ad208490-4052-4f91-a57e-433f2d1e484b";
+        return {
+          results: [{ url, title: "Engineer", description: null }],
+          usage: { via: "cloud", credits: 2 } as const,
+        };
+      }),
   });
   return { scraped, firecrawl };
 };
@@ -168,6 +177,28 @@ describe("page cache", () => {
     });
     expect(await run(program)).toEqual([plain("Markdown 1"), plain("Markdown 1")]);
     expect(scraped).toEqual(["https://example.com/job/1"]);
+  });
+
+  test("searches a search source at most once a day", async () => {
+    const { run, scraped } = setup();
+    const source = {
+      url: "search:engineer",
+      kind: "SEARCH",
+      adapterKey: null,
+      query: "engineer",
+    } as const;
+    const program = Effect.gen(function* () {
+      const first = yield* scrapeSourceListings("alice", source);
+      yield* TestClock.adjust("23 hours");
+      yield* scrapeSourceListings("alice", source);
+      yield* TestClock.adjust("1 hour");
+      yield* scrapeSourceListings("alice", source);
+      return first.listings.map(({ url, company }) => ({ url, company }));
+    });
+    expect(await run(program)).toEqual([
+      { url: "https://jobs.lever.co/acme/ad208490-4052-4f91-a57e-433f2d1e484b", company: "acme" },
+    ]);
+    expect(scraped).toEqual(["search engineer", "search engineer"]);
   });
 
   test("caches source listings for 15 minutes", async () => {

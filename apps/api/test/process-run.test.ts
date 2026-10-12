@@ -170,6 +170,7 @@ describe("process run", () => {
           };
         }),
       map: () => Effect.die("unused"),
+      search: () => Effect.die("unused"),
     });
     // The jobs' links carry no titles, so the model reads each page.
     const extractor = ListingExtractor.of({

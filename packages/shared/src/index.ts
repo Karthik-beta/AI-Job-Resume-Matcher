@@ -37,6 +37,19 @@ const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 export const CreateJobSource = Schema.Struct({ url: HttpUrl });
 export type CreateJobSource = typeof CreateJobSource.Type;
 
+export const maxSearchQueryLength = 200;
+
+// A web search of the ATS job boards for the past week's ads.
+export const CreateSearchSource = Schema.Struct({
+  query: Schema.Trim.check(
+    Schema.makeFilter((query) => query !== "", { message: "Enter what to search for" }),
+    Schema.makeFilter((query) => query.length <= maxSearchQueryLength, {
+      message: `Use at most ${maxSearchQueryLength} characters`,
+    }),
+  ),
+});
+export type CreateSearchSource = typeof CreateSearchSource.Type;
+
 export const SourceKind = Schema.Literals([
   "GREENHOUSE",
   "LEVER",

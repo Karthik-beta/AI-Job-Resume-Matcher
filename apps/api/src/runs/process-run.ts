@@ -28,6 +28,7 @@ import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
 import { FirecrawlPlan, RunCloudBudget, ScrapeHealth } from "../matching/scrape-router";
 import type { HostLimiter } from "../matching/sources/http";
+import { listingKind } from "../matching/sources/search";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
 import { requirementsOf, titleFiltersOf } from "./run-settings";
@@ -171,7 +172,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
         } = yield* scrapeSourceListings(userId, source);
         for (const { url } of found) {
           const canonical = canonicalUrl(url);
-          if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, source.kind);
+          if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, listingKind(source.kind, url));
         }
         listings.push(...found);
         // A page that embeds an ATS board is offered as a switch on the sources page.
@@ -194,6 +195,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     // Nothing can be analysed without the resume and listings, so every error here stops the run.
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
     const { resume, listings, kindByUrl } = prepared.success;
+    const kindOf = (job: Listing) => kindByUrl.get(canonicalUrl(job.url)) ?? "PAGE";
 
     const eligible = listings.filter(
       (listing) => acceptsJob(requirements, listing) && acceptsTitle(titleFilters, listing.title),
@@ -269,7 +271,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     if (scheduled && left !== null) {
       const costs: number[] = [];
       for (const job of selected) {
-        costs.push(yield* jobCredits(userId, job, kindByUrl.get(job.url) ?? "PAGE", mode));
+        costs.push(yield* jobCredits(userId, job, kindOf(job), mode));
       }
       const fitting = fitJobs(selected, costs, left);
       if (fitting.length < selected.length) {
@@ -283,7 +285,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     for (const job of selected) {
       // Kept when the evaluation fails after the page was read.
       let scrapedVia: ScrapeVia | null = null;
-      const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
+      const outcome = yield* jobPageFor(userId, job, kindOf(job)).pipe(
         Effect.flatMap((page) =>
           Effect.gen(function* () {
             scrapedVia = page.via;
