@@ -63,6 +63,12 @@ export type MapSite = (
   options: MapOptions,
 ) => Effect.Effect<{ readonly links: readonly MappedLink[] }, unknown>;
 
+export interface JobPageScrape {
+  readonly markdown: string;
+  // For the page's schema.org JobPosting data; see job-posting.ts.
+  readonly rawHtml: string | null;
+}
+
 export interface ListingPage {
   readonly markdown: string;
   readonly links: readonly string[];
@@ -77,6 +83,8 @@ export class Firecrawl extends Context.Service<
   Firecrawl,
   {
     readonly scrapeMarkdown: (url: string) => Effect.Effect<string, FirecrawlError>;
+    // A job ad's main content, with the page's HTML for its structured data.
+    readonly scrapeJob: (url: string) => Effect.Effect<JobPageScrape, FirecrawlError>;
     readonly scrapeListingPage: (
       url: string,
       options?: { readonly selector?: string | null; readonly withHtml?: boolean },
@@ -102,6 +110,13 @@ const siteNameOf = (metadata: ScrapedPage["metadata"]) => {
       ?.trim();
   return name || null;
 };
+
+const requireMarkdown = ({ markdown }: ScrapedPage): Effect.Effect<string, ScrapeFailed> =>
+  markdown?.trim()
+    ? Effect.succeed(markdown)
+    : Effect.fail(
+        new ScrapeFailed({ status: null, message: "Firecrawl returned no document markdown." }),
+      );
 
 const isRateLimited = (cause: unknown): cause is SdkError =>
   cause instanceof SdkError && cause.status === 429;
@@ -151,16 +166,18 @@ export const makeFirecrawl = (client: { readonly scrape: ScrapePage; readonly ma
 
     return Firecrawl.of({
       scrapeMarkdown: (url) =>
-        request(url, { formats: ["markdown"] }).pipe(
-          Effect.flatMap(({ markdown }) =>
-            markdown?.trim()
-              ? Effect.succeed(markdown)
-              : Effect.fail(
-                  new ScrapeFailed({
-                    status: null,
-                    message: "Firecrawl returned no document markdown.",
-                  }),
-                ),
+        request(url, { formats: ["markdown"] }).pipe(Effect.flatMap(requireMarkdown)),
+      // rawHtml adds no credits to the page's one (https://docs.firecrawl.dev/billing).
+      scrapeJob: (url) =>
+        request(url, {
+          formats: ["markdown", "rawHtml"],
+          onlyMainContent: true,
+          excludeTags: chromeTags,
+        }).pipe(
+          Effect.flatMap((page) =>
+            requireMarkdown(page).pipe(
+              Effect.map((markdown) => ({ markdown, rawHtml: page.rawHtml ?? null })),
+            ),
           ),
         ),
       // markdown, links and rawHtml together cost one credit.

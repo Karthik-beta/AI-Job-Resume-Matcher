@@ -86,10 +86,15 @@ model Run {
   @@index([userId, createdAt])
 }
 
+enum SkipReason {
+  EXPIRED // the job page's structured data says the posting has closed
+  TRIAGE // title triage ranked it below the threshold
+}
+
 model JobResult {
-  id          String   @id @default(uuid(7))
+  id          String      @id @default(uuid(7))
   runId       String
-  run         Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run         Run         @relation(fields: [runId], references: [id], onDelete: Cascade)
   userId      String
   contextKey  String
   jobUrl      String
@@ -98,11 +103,12 @@ model JobResult {
   locations   String[]
   expMinYears Float?
   expMaxYears Float?
-  isMatch     Boolean? // null when the job errored
+  isMatch     Boolean? // null when the job errored or was skipped
   reason      String?
   error       String?
-  matchSaved  Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  skipped     SkipReason? // set when the job was settled without an evaluation
+  matchSaved  Boolean     @default(false)
+  createdAt   DateTime    @default(now())
 
   @@unique([userId, contextKey, jobUrl])
 }

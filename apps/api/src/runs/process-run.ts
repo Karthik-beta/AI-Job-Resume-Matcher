@@ -1,12 +1,13 @@
 import type { SourceKind } from "@job-matcher/shared";
-import { Effect } from "effect";
-import type { PrismaClient } from "../generated/prisma/client";
+import { Clock, Effect } from "effect";
+import type { JobResult, PrismaClient } from "../generated/prisma/client";
 import { contextKey as contextKeyOf } from "../matching/context-key";
 import { Notifier } from "../matching/discord";
 import type { HttpFetch } from "../matching/download";
 import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
+import { evaluationText, isExpired, withPosting } from "../matching/job-posting";
 import type { ListingExtractor } from "../matching/listing-extractor";
 import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
@@ -34,6 +35,21 @@ const uniqueByUrl = (listings: readonly Listing[]) => {
   const byUrl = new Map<string, Listing>();
   for (const listing of listings) if (!byUrl.has(listing.url)) byUrl.set(listing.url, listing);
   return [...byUrl.values()];
+};
+
+type Verdict = Pick<JobResult, "isMatch" | "reason" | "skipped">;
+
+const expired: Verdict = {
+  isMatch: null,
+  reason: "The posting has closed (its page says it was valid until an earlier date)",
+  skipped: "EXPIRED",
+};
+
+// Recorded as a non-match: the job is settled for this context, like any other verdict.
+const unsuitable: Verdict = {
+  isMatch: false,
+  reason: "Doesn't meet your requirements (from the job page's structured data)",
+  skipped: null,
 };
 
 const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
@@ -141,12 +157,21 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
 
     for (const job of selected) {
       const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
-        Effect.flatMap((jobPage) =>
-          evaluator.evaluate({
-            resume: resume.text,
-            resumeHash: resume.hash,
-            jobPage,
-            requirements,
+        Effect.flatMap((page) =>
+          Effect.gen(function* () {
+            const enriched = withPosting(job, page.posting);
+            if (isExpired(page.posting, yield* Clock.currentTimeMillis)) {
+              return { enriched, verdict: expired };
+            }
+            // The page can say what the listing did not, such as its location.
+            if (!acceptsJob(requirements, enriched)) return { enriched, verdict: unsuitable };
+            const verdict = yield* evaluator.evaluate({
+              resume: resume.text,
+              resumeHash: resume.hash,
+              jobPage: evaluationText(enriched, page),
+              requirements,
+            });
+            return { enriched, verdict: { ...verdict, skipped: null } };
           }),
         ),
         Effect.result,
@@ -157,14 +182,15 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
 
       const result =
         outcome._tag === "Success"
-          ? { isMatch: outcome.success.isMatch, reason: outcome.success.reason, error: null }
-          : { isMatch: null, reason: null, error: outcome.failure.message };
+          ? { ...outcome.success.verdict, error: null }
+          : { isMatch: null, reason: null, skipped: null, error: outcome.failure.message };
+      const read = outcome._tag === "Success" ? outcome.success.enriched : job;
       const listing = {
-        title: job.title,
-        company: job.company,
-        locations: [...job.locations],
-        expMinYears: job.experienceMinYears,
-        expMaxYears: job.experienceMaxYears,
+        title: read.title,
+        company: read.company,
+        locations: [...read.locations],
+        expMinYears: read.experienceMinYears,
+        expMaxYears: read.experienceMaxYears,
       };
       // A failed save keeps the verdict without an error, so the job is not analysed again
       // and the match can be saved later from the run page.

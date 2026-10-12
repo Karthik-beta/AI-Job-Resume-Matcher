@@ -27,6 +27,8 @@ const JobResult = Schema.Struct({
   isMatch: Schema.NullOr(Schema.Boolean),
   reason: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
+  // Settled without an evaluation.
+  skipped: Schema.NullOr(Schema.Literals(["EXPIRED", "TRIAGE"])),
   matchSaved: Schema.Boolean,
 });
 export type JobResult = typeof JobResult.Type;

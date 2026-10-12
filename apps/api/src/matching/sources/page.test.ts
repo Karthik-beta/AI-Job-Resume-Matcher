@@ -50,6 +50,7 @@ const fetchPage = async (
   const maps: string[] = [];
   const firecrawl = Firecrawl.of({
     scrapeMarkdown: () => Effect.die("unused"),
+    scrapeJob: () => Effect.die("unused"),
     scrapeListingPage: (url, { selector = null, withHtml = false } = {}) =>
       Effect.sync(() => {
         scrapes.push({ url, selector, withHtml });

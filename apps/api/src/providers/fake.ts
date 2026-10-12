@@ -47,6 +47,12 @@ const pagePath = (url: string) => {
 export const fakeFirecrawl = Firecrawl.of({
   scrapeMarkdown: (url) =>
     scriptedError(url).pipe(Effect.andThen(Effect.suspend(() => readFixture(pagePath(url))))),
+  // The fixture job pages have no structured data.
+  scrapeJob: (url) =>
+    scriptedError(url).pipe(
+      Effect.andThen(Effect.suspend(() => readFixture(pagePath(url)))),
+      Effect.map((markdown) => ({ markdown, rawHtml: null })),
+    ),
   // Every careers page serves the same board, whose links the fake extractor reads.
   scrapeListingPage: (url) =>
     scriptedError(url).pipe(

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
+import { pageFixture } from "../../test/pages";
 import { type Download, HttpFetch } from "./download";
 import { ScrapeFailed } from "./errors";
 import { Firecrawl, type Listing } from "./firecrawl";
+import { parseJobPosting } from "./job-posting";
 import { ListingExtractor } from "./listing-extractor";
 import {
   type CachedPage,
@@ -47,6 +49,9 @@ const listing: Listing = {
 // The listing a page source reads from its link.
 const pageListing: Listing = { ...listing, locations: [], experienceMinYears: null };
 
+// A job page without structured data.
+const plain = (markdown: string) => ({ markdown, posting: null });
+
 const pageSource = (url: string) => ({ url, kind: "PAGE", adapterKey: null }) as const;
 
 const memoryStore = () => {
@@ -62,15 +67,21 @@ const memoryStore = () => {
   return { rows, store, id };
 };
 
-const fakeFirecrawl = (fail = false, markdown?: string, listingMarkdown = "[Engineer](/job/1)") => {
+const fakeFirecrawl = (
+  fail = false,
+  markdown?: string,
+  listingMarkdown = "[Engineer](/job/1)",
+  rawHtml: string | null = null,
+) => {
   const scraped: string[] = [];
   const firecrawl = Firecrawl.of({
-    scrapeMarkdown: (url) =>
+    scrapeMarkdown: () => Effect.die("unused"),
+    scrapeJob: (url) =>
       Effect.suspend(() => {
         scraped.push(url);
         return fail
           ? Effect.fail(new ScrapeFailed({ status: 500, message: "Server error" }))
-          : Effect.succeed(markdown ?? `Markdown ${scraped.length}`);
+          : Effect.succeed({ markdown: markdown ?? `Markdown ${scraped.length}`, rawHtml });
       }),
     scrapeListingPage: (url) =>
       Effect.sync(() => {
@@ -83,10 +94,21 @@ const fakeFirecrawl = (fail = false, markdown?: string, listingMarkdown = "[Engi
 };
 
 const setup = (
-  options: { fail?: boolean; markdown?: string; listingMarkdown?: string; respond?: Respond } = {},
+  options: {
+    fail?: boolean;
+    markdown?: string;
+    listingMarkdown?: string;
+    rawHtml?: string;
+    respond?: Respond;
+  } = {},
 ) => {
   const memory = memoryStore();
-  const fake = fakeFirecrawl(options.fail, options.markdown, options.listingMarkdown);
+  const fake = fakeFirecrawl(
+    options.fail,
+    options.markdown,
+    options.listingMarkdown,
+    options.rawHtml,
+  );
   const extractions: string[] = [];
   const extractor = ListingExtractor.of({
     extract: ({ url }) =>
@@ -134,7 +156,7 @@ describe("page cache", () => {
       const second = yield* scrapeJobPage("alice", "https://example.com/job/1");
       return [first, second];
     });
-    expect(await run(program)).toEqual(["Markdown 1", "Markdown 1"]);
+    expect(await run(program)).toEqual([plain("Markdown 1"), plain("Markdown 1")]);
     expect(scraped).toEqual(["https://example.com/job/1"]);
   });
 
@@ -198,6 +220,32 @@ describe("page cache", () => {
     expect(scraped).toEqual([url, url]);
   });
 
+  test("reads a job page's structured data and keeps it with the page", async () => {
+    const rawHtml = await pageFixture("lever-job.html");
+    const { run, rows, id, scraped } = setup({ markdown: "# Customer Success Manager", rawHtml });
+    const url = "https://jobs.lever.co/leverdemo/1";
+    const program = Effect.all([scrapeJobPage("alice", url), scrapeJobPage("alice", url)]);
+    const [first, second] = await run(program);
+    expect(first).toEqual({
+      markdown: "# Customer Success Manager",
+      posting: parseJobPosting(rawHtml),
+    });
+    expect(first.posting?.locations).toEqual(["Atlanta, Georgia"]);
+    expect(second).toEqual(first);
+    expect(scraped).toEqual([url]);
+    expect(rows.get(id({ userId: "alice", url, kind: "JOB_PAGE" }))?.content as unknown).toEqual(
+      first,
+    );
+  });
+
+  test("reads a job page cached as plain markdown", async () => {
+    const { run, rows, id, scraped } = setup();
+    const url = "https://example.com/job/1";
+    rows.set(id({ userId: "alice", url, kind: "JOB_PAGE" }), { content: "Old", expiresAt: null });
+    expect(await run(scrapeJobPage("alice", url))).toEqual(plain("Old"));
+    expect(scraped).toEqual([]);
+  });
+
   test("does not cache a failed scrape", async () => {
     const { run, rows } = setup({ fail: true });
     const error = await run(Effect.flip(scrapeJobPage("alice", "https://example.com/job/1")));
@@ -245,7 +293,8 @@ describe("job pages for listings", () => {
   test("uses the listing's own job ad without scraping or caching", async () => {
     const { run, scraped, requests, rows } = setup();
     const page = await run(jobPageFor("alice", { ...job, description: "Ad text" }, "LEVER"));
-    expect(page).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
+    expect(page.posting).toBeNull();
+    expect(page.markdown).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
     expect([...scraped, ...requests]).toEqual([]);
     expect(rows.size).toBe(0);
   });
@@ -265,15 +314,15 @@ describe("job pages for listings", () => {
       jobPageFor("alice", job, "SMARTRECRUITERS"),
     ]);
     const [first, second] = await run(program);
-    expect(first).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
-    expect(second).toBe(first);
+    expect(first.markdown).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
+    expect(second).toEqual(first);
     expect(requests).toEqual([`GET ${apiUrl}`]);
     expect(scraped).toEqual([]);
   });
 
   test("scrapes the job page when the source cannot supply the ad", async () => {
     const { run, scraped } = setup();
-    expect(await run(jobPageFor("alice", job, "PAGE"))).toBe("Markdown 1");
+    expect(await run(jobPageFor("alice", job, "PAGE"))).toEqual(plain("Markdown 1"));
     expect(scraped).toEqual([jobUrl]);
   });
 });
@@ -286,15 +335,15 @@ describe("PDF job pages", () => {
     const { run, scraped, requests } = setup({ respond: () => pdfResponse });
     const program = Effect.all([scrapeJobPage("alice", pdfUrl), scrapeJobPage("alice", pdfUrl)]);
     const [first, second] = await run(program);
-    expect(first).toContain("Senior Backend Engineer");
-    expect(second).toBe(first);
+    expect(first.markdown).toContain("Senior Backend Engineer");
+    expect(second).toEqual(first);
     expect(requests).toEqual([`GET ${pdfUrl}`]);
     expect(scraped).toEqual([]);
   });
 
   test("downloads a page whose HEAD reports a PDF", async () => {
     const { run, scraped, requests } = setup({ respond: () => pdfResponse });
-    expect(await run(scrapeJobPage("alice", pageUrl))).toContain("Acme Analytics");
+    expect((await run(scrapeJobPage("alice", pageUrl))).markdown).toContain("Acme Analytics");
     expect(requests).toEqual([`HEAD ${pageUrl}`, `GET ${pageUrl}`]);
     expect(scraped).toEqual([]);
   });
@@ -307,13 +356,15 @@ describe("PDF job pages", () => {
     ["a PDF download with an error status", pdfUrl, () => ({ ...pdfResponse, status: 404 })],
   ])("falls back to Firecrawl after %s", async (_name, url, respond) => {
     const { run, scraped } = setup(respond ? { respond } : {});
-    expect(await run(scrapeJobPage("alice", url))).toBe("Markdown 1");
+    expect(await run(scrapeJobPage("alice", url))).toEqual(plain("Markdown 1"));
     expect(scraped).toEqual([url]);
   });
 
   test("parses a PDF Firecrawl returned as base64", async () => {
     const markdown = Buffer.from(jobAd).toString("base64");
     const { run } = setup({ markdown, respond: () => htmlResponse });
-    expect(await run(scrapeJobPage("alice", pageUrl))).toContain("Senior Backend Engineer");
+    expect((await run(scrapeJobPage("alice", pageUrl))).markdown).toContain(
+      "Senior Backend Engineer",
+    );
   });
 });

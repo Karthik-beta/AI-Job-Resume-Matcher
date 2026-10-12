@@ -14,6 +14,7 @@ export const statusLabels: Record<RunStatus, string> = {
 };
 
 function verdictOf(result: JobResult): Verdict {
+  if (result.skipped === "EXPIRED") return "expired";
   if (result.error !== null || result.isMatch === null) return "failed";
   return result.isMatch ? "match" : "no-match";
 }

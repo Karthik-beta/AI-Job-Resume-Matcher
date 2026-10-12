@@ -40,6 +40,8 @@ export const htmlToText = (html: string) =>
     .replace(/[ \t\xa0]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
+    // A list item that wraps its text in a paragraph.
+    .replace(/\n-\n+/g, "\n- ")
     .replace(/\n+- /g, "\n- ")
     .trim();
 

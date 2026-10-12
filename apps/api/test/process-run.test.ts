@@ -45,6 +45,23 @@ const listings: Record<string, Listing[]> = {
   ],
 };
 
+const sourceD = "https://board.example.com/d";
+listings[sourceD] = [listing("7"), listing("8"), listing("9")];
+
+const jsonLd = (posting: object) =>
+  `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", ...posting })}</script>`;
+const mumbai = { "@type": "Place", address: { addressLocality: "Mumbai" } };
+const bengaluru = { "@type": "Place", address: { addressLocality: "Bengaluru" } };
+// Job pages with schema.org JobPosting data.
+const jobHtml: Record<string, string> = {
+  "https://jobs.example.com/7": jsonLd({ validThrough: "2020-01-31", jobLocation: bengaluru }),
+  "https://jobs.example.com/8": jsonLd({ jobLocation: mumbai, description: "<p>Ad</p>" }),
+  "https://jobs.example.com/9": jsonLd({
+    jobLocation: bengaluru,
+    description: "<p>Build APIs.</p>",
+  }),
+};
+
 type Verdict = "match" | "no match" | "invalid" | "auth";
 
 describe("process run", () => {
@@ -82,10 +99,11 @@ describe("process run", () => {
             }),
     });
     const firecrawl = Firecrawl.of({
-      scrapeMarkdown: (url) =>
+      scrapeMarkdown: () => Effect.die("unused"),
+      scrapeJob: (url) =>
         Effect.sync(() => {
           scraped.push(url);
-          return `Page ${url}`;
+          return { markdown: `Page ${url}`, rawHtml: jobHtml[url] ?? null };
         }),
       scrapeListingPage: (url, options) =>
         Effect.sync(() => {
@@ -330,6 +348,54 @@ describe("process run", () => {
     // The first check of a page source records the board it embeds.
     const checked = await prisma.jobSource.findUniqueOrThrow({ where: { id: source.id } });
     expect(checked).toMatchObject({ suggestedKind: "GREENHOUSE", suggestedAdapterKey: "acme" });
+  });
+
+  it("uses the job pages' structured data", async () => {
+    const source = await prisma.jobSource.create({ data: { userId, url: sourceD } });
+    const run = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+    });
+    const { run: finished, evaluated } = await runWith(run.id, {});
+
+    // Only the open job in an accepted city is evaluated, from the posting's own ad.
+    expect(evaluated).toEqual(["# Job 9\n\nExample · Bengaluru\n\nBuild APIs."]);
+    expect(finished).toMatchObject({ status: "COMPLETED", eligible: 3, checked: 3, failed: 0 });
+    const results = await prisma.jobResult.findMany({
+      where: { runId: run.id },
+      orderBy: { jobUrl: "asc" },
+      select: { jobUrl: true, isMatch: true, reason: true, skipped: true, locations: true },
+    });
+    expect(results).toEqual([
+      {
+        jobUrl: jobUrl("7"),
+        isMatch: null,
+        reason: "The posting has closed (its page says it was valid until an earlier date)",
+        skipped: "EXPIRED",
+        locations: ["Bengaluru"],
+      },
+      {
+        jobUrl: jobUrl("8"),
+        isMatch: false,
+        reason: "Doesn't meet your requirements (from the job page's structured data)",
+        skipped: null,
+        locations: ["Mumbai"],
+      },
+      {
+        jobUrl: jobUrl("9"),
+        isMatch: false,
+        reason: "Missing skills",
+        skipped: null,
+        locations: ["Bengaluru"],
+      },
+    ]);
+
+    // Settled jobs, expired ones included, are not read again in the same context.
+    const again = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+    });
+    const repeat = await runWith(again.id, {});
+    expect(repeat.evaluated).toEqual([]);
+    expect(repeat.run).toMatchObject({ status: "COMPLETED", checked: 0 });
   });
 
   it("ignores a run that is no longer queued", async () => {
