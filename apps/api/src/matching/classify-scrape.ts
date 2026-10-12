@@ -69,9 +69,12 @@ const hasChallenge = (page: ScrapedPage) =>
 export const classifyScrape = (result: ScrapeResult, kind: PageKind | "map"): ScrapeOutcome => {
   if ("error" in result) {
     const { status } = result.error;
-    // No response, a timeout, or every engine failing (Firecrawl's 500) says nothing about
-    // the site: the instance may be down. Any other API status is a request the page cannot fix.
-    if (status === null || status === 408 || status >= 500) return "unreachable";
+    // No response, a timeout, every engine failing (Firecrawl's 500), or the instance's own
+    // auth or rate limit says nothing about the site: the site's answer comes back as a page
+    // with its status. Any other API status is a request the page cannot fix.
+    if (status === null || status === 408 || status >= 500 || blockedStatuses.has(status)) {
+      return "unreachable";
+    }
     return outcomeOfStatus(status) ?? "failed";
   }
   if (kind === "map") return "ok";

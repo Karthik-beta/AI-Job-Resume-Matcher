@@ -92,7 +92,9 @@ describe("classifyScrape", () => {
     [408, "unreachable"],
     [500, "unreachable"],
     [503, "unreachable"],
-    [403, "blocked"],
+    [401, "unreachable"],
+    [403, "unreachable"],
+    [429, "unreachable"],
     [404, "gone"],
     [400, "failed"],
     // Firecrawl reports some failures, such as a DNS error, with a 200.
