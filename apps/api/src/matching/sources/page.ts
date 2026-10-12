@@ -140,7 +140,11 @@ export const pageAdapter: SourceAdapter = {
     Effect.gen(function* () {
       if (source.useMap) {
         const mapped = yield* mapListings(source);
-        if (mapped.length > 0) return { listings: mapped };
+        // The hash of the mapped job links replaces the page's, so a stale page hash is not kept.
+        if (mapped.length > 0) {
+          const urls = mapped.map(({ url }) => url).sort();
+          return { listings: mapped, listingHash: listingHashOf(urls.join(" ")) };
+        }
         yield* Effect.logInfo(`Firecrawl's map has no job links for ${source.url}.`);
       }
       const pages = yield* scrapePages(source);

@@ -104,6 +104,8 @@ describe("job sources", () => {
   it.each([
     [{ kind: "GREENHOUSE", adapterKey: null }],
     [{ kind: "ASHBY", adapterKey: "  " }],
+    [{ kind: "LEVER", adapterKey: "acme/jobs" }],
+    [{ kind: "GREENHOUSE", adapterKey: "acme inc" }],
     [{ kind: "SEARCH", adapterKey: null }],
     [{ kind: "PAGE", adapterKey: null, useMap: "yes" }],
     [{ kind: "OTHER", adapterKey: null }],

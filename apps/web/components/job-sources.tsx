@@ -164,18 +164,31 @@ function SourceRow({
       const updated = decodeSource(
         await api(`/sources/${source.id}`, { method: "PATCH", body: JSON.stringify(value) }),
       );
-      if (Option.isSome(updated)) {
-        onUpdated(updated.value);
-        setKind(updated.value.kind);
-        setAdapterKey(updated.value.adapterKey ?? "");
-        setUseMap(updated.value.useMap);
+      if (Option.isNone(updated)) {
+        setError("The source was updated, but its details could not be read. Refresh the page.");
+        return;
       }
+      onUpdated(updated.value);
+      setKind(updated.value.kind);
+      setAdapterKey(updated.value.adapterKey ?? "");
+      setUseMap(updated.value.useMap);
       setEditing(false);
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not update the source.");
     } finally {
       setPending(false);
     }
+  }
+
+  // Cancelling drops the unsaved type, board name and map choice.
+  function toggleEditing() {
+    if (editing) {
+      setKind(source.kind);
+      setAdapterKey(source.adapterKey ?? "");
+      setUseMap(source.useMap);
+      setError(null);
+    }
+    setEditing(!editing);
   }
 
   function save(event: SubmitEvent<HTMLFormElement>) {
@@ -197,7 +210,7 @@ function SourceRow({
           <span className="truncate">{source.url}</span>
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button variant="outline" size="sm" onClick={() => setEditing((open) => !open)}>
+          <Button variant="outline" size="sm" onClick={toggleEditing}>
             {editing ? "Cancel" : "Change type"}
           </Button>
           <Button variant="outline" size="sm" onClick={onRemove}>

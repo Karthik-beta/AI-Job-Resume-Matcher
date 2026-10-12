@@ -306,6 +306,14 @@ describe("page adapter with Firecrawl's map", () => {
     );
     expect(maps).toEqual([`${url} job`]);
     expect(scrapes).toEqual([]);
+    expect(result).toMatchObject({
+      success: {
+        listingHash: listingHashOf(
+          "https://careers.acme.com/jobs/data_engineer " +
+            "https://www.acme.com/jobs/senior-backend-engineer-123456",
+        ),
+      },
+    });
     expect(listingsOf(result)).toEqual([
       job({
         title: "Senior Backend Engineer",

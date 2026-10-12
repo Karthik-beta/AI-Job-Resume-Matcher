@@ -185,8 +185,10 @@ export const nextPageUrl = (markdown: string, pageUrl: string, sourceUrl: string
       (pageParams.some((name) => url.searchParams.has(name)) || pagedPath.test(url.pathname));
     return isNext || isPage ? [{ href, isNext, number: pageNumber(url) }] : [];
   });
+  // A page without a page number is the first, so a link back to it as page 1 is not followed.
+  const current = pageNumber(page) || 1;
   const later = candidates
-    .filter(({ number }) => number > pageNumber(page))
+    .filter(({ number }) => number > current)
     .sort((a, b) => a.number - b.number);
   return (candidates.find(({ isNext }) => isNext) ?? later[0])?.href ?? null;
 };

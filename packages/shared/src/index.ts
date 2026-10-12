@@ -74,7 +74,14 @@ export const UpdateJobSource = Schema.Struct({
       message: "A source cannot be switched to search",
     }),
   ),
-  adapterKey: Schema.NullOr(Schema.Trim),
+  // The characters a board name has in an ATS URL, as the API's source detection reads it.
+  adapterKey: Schema.NullOr(
+    Schema.Trim.check(
+      Schema.makeFilter((key) => key === "" || /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(key), {
+        message: "Use only letters, numbers, dots, dashes and underscores in the board name",
+      }),
+    ),
+  ),
   // Page sources only: read job links from Firecrawl's map of the site.
   useMap: Schema.optionalKey(Schema.Boolean),
 }).check(
