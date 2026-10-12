@@ -1,8 +1,12 @@
+import type { SourceKind } from "@job-matcher/shared";
 import { Clock, Context, Duration, Effect, Layer, Option, Schema } from "effect";
 import type { CacheKind, Prisma, PrismaClient } from "../generated/prisma/client";
 import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
+import { type ListingSource, listingPage } from "./sources/adapter";
+import type { DetectedSource } from "./sources/detect";
+import { adapterFor } from "./sources/registry";
 
 const listingsTtl = Duration.minutes(15);
 
@@ -105,13 +109,41 @@ const fetchJobPage = (url: string) =>
 export const scrapeJobPage = (userId: string, url: string) =>
   cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, fetchJobPage(url));
 
-export const scrapeSourceListings = (userId: string, url: string) =>
+// Keyed by the source URL; changing a source's kind clears its row (see SourcesService.update).
+// Only the listings are cached; an embedded board is reported by the scrape that found it.
+export const scrapeSourceListings = (userId: string, source: ListingSource) =>
   Effect.gen(function* () {
-    const firecrawl = yield* Firecrawl;
-    return yield* cached(
-      { userId, url, kind: "SOURCE_LISTING" },
+    const found: { embedded: DetectedSource | null } = { embedded: null };
+    const listings = yield* cached(
+      { userId, url: source.url, kind: "SOURCE_LISTING" },
       decodeListings,
       listingsTtl,
-      firecrawl.scrapeListings(url),
+      adapterFor(source.kind)
+        .fetchListings(source)
+        .pipe(
+          Effect.map((fetched) => {
+            found.embedded = fetched.embedded ?? null;
+            return fetched.listings;
+          }),
+        ),
+    );
+    return { listings, embedded: found.embedded };
+  });
+
+const withDescription = (listing: Listing, description: string) =>
+  listingPage({ ...listing, description });
+
+// A listing that came with its job ad is not scraped. Otherwise the source's API supplies the
+// ad when it can, and the page is scraped as a last resort; both are cached like job pages.
+export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =>
+  Effect.gen(function* () {
+    if (listing.description !== undefined) return withDescription(listing, listing.description);
+    const { fetchDescription } = adapterFor(kind);
+    if (!fetchDescription) return yield* scrapeJobPage(userId, listing.url);
+    return yield* cached(
+      { userId, url: listing.url, kind: "JOB_PAGE" },
+      decodeMarkdown,
+      null,
+      fetchDescription(listing).pipe(Effect.map((text) => withDescription(listing, text))),
     );
   });

@@ -1,0 +1,50 @@
+{
+  "offers": [
+    {
+      "id": 2771751,
+      "guid": "wgtlr",
+      "title": "Deputy AML Manager - Belgium",
+      "slug": "deputy-aml-manager-belgium",
+      "company_name": "bunq",
+      "careers_url": "https://careers.bunq.com/o/deputy-aml-manager-belgium",
+      "careers_apply_url": "https://careers.bunq.com/o/deputy-aml-manager-belgium/c/new",
+      "location": "Brussels, Brussels, Belgium",
+      "city": "Brussels",
+      "state_name": "Brussels",
+      "country": "Belgium",
+      "country_code": "BE",
+      "remote": false,
+      "hybrid": true,
+      "on_site": false,
+      "published_at": "2026-10-05 16:05:18 UTC",
+      "created_at": "2026-10-05 15:45:18 UTC",
+      "experience_code": "experienced",
+      "employment_type_code": "fulltime_permanent",
+      "description": "<p><strong>Ready to Get Shit Done?</strong></p><p>At bunq, we're more than just a bank, we're transforming how people experience banking across Europe. Our users deserve to bank like locals, no matter where they are. We started Belgium with local IBANs, but we're now upgrading to full-branch status, which means taking on direct regulatory standing, deeper compliance obligations, and new accountability to Belgium's NBB (National Bank of Belgium) and financial regulators.</p><p style=\"min-height: 1.7em;\"></p>",
+      "requirements": "<p>Do You Have What It Takes?</p><ul><li><p>Deep Belgian AML/CFT &amp; regulatory expertise - You understand NBB requirements, FSMA rules, local banking regulations, and their practical application; you can translate Belgian regulatory language into operational compliance controls.</p></li><li><p>Proven ownership of compliance programs end-to-end - You've built or scaled a compliance program (not just supported one), managing operational readiness, risk assessment, and regulatory reporting as the accountable person.</p></li><li><p>Proven ability to manage AML inspections and regulatory audits, preparing evidence, audit trails, and control documentation for regulator scrutiny.</p></li>"
+    },
+    {
+      "id": 2771667,
+      "guid": "vgk5y",
+      "title": "Website Lead",
+      "slug": "website-lead",
+      "company_name": "bunq",
+      "careers_url": "https://careers.bunq.com/o/website-lead",
+      "careers_apply_url": "https://careers.bunq.com/o/website-lead/c/new",
+      "location": "Amsterdam, Noord-Holland, Netherlands",
+      "city": "Amsterdam",
+      "state_name": "Noord-Holland",
+      "country": "Netherlands",
+      "country_code": "NL",
+      "remote": false,
+      "hybrid": true,
+      "on_site": false,
+      "published_at": "2026-10-05 15:07:51 UTC",
+      "created_at": "2026-10-05 14:47:43 UTC",
+      "experience_code": "experienced",
+      "employment_type_code": "fulltime_permanent",
+      "description": "<p>Ready to Get Shit Done?</p><p>At bunq, we're reshaping how people experience banking globally. Our website is the digital front door, where millions of potential users first discover who we are, what we offer, and why they should trust us. As a Website Lead, your mission is to own the entire website experience from strategy through execution, making sure our digital presence converts visitors into loyal users and establishes bunq as the go-to fintech solution.</p><p>Your role is to build, optimize, and scale bunq.com into a high-performing, conversion-focused asset that tells our story compellingly and gets users to sign up or download our app.</p><p style=\"min-height: 1.7em;\"></p>",
+      "requirements": "<p><strong>Do You Have What It Takes?</strong></p><ul><li><p>Website strategy &amp; execution expertise: Proven track record building and optimizing high-traffic websites with focus on conversion, user experience, and measurable impact.</p></li><li><p>Technical depth: You understand site architecture, core web vitals, mobile optimization, and analytics; hands-on experience with web tech stack (front-end, performance tools, A/B testing platforms).</p></li><li><p>Data-driven mindset: You design experiments, interpret analytics (GA4, Looker), build conversion funnels, and use data to make decisions—not gut feel.</p></li>"
+    }
+  ]
+}

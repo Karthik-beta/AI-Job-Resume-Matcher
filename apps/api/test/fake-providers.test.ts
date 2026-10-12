@@ -63,6 +63,9 @@ describe("fake providers", () => {
     await expect(fetch("https://api.firecrawl.dev/v2/scrape")).rejects.toThrow(
       "Tests must not call",
     );
+    await expect(fetch("https://boards-api.greenhouse.io/v1/boards/x/jobs")).rejects.toThrow(
+      "Tests must not call",
+    );
     expect(() => liveProvidersLayer("example/model")).toThrow();
   });
 

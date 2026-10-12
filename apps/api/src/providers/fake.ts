@@ -13,6 +13,7 @@ import { MatchEvaluator } from "../matching/evaluate";
 import { Firecrawl, Listing } from "../matching/firecrawl";
 import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
+import { hostLimiterLayer } from "../matching/sources/http";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -48,6 +49,7 @@ export const fakeFirecrawl = Firecrawl.of({
     scriptedError(url).pipe(
       Effect.andThen(readFixture("listings.json")),
       Effect.flatMap((text) => decodeListings(JSON.parse(text))),
+      Effect.map((listings) => ({ listings, rawHtml: null, links: [] })),
       Effect.mapError((error) =>
         error._tag === "SchemaError"
           ? new ScrapeFailed({ status: null, message: "listings.json does not match Listing." })
@@ -110,4 +112,5 @@ export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
   Layer.succeed(Notifier, fakeNotifier),
+  hostLimiterLayer,
 );

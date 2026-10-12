@@ -6,12 +6,14 @@ import { ScrapeFailed } from "./errors";
 import { Firecrawl, type Listing } from "./firecrawl";
 import {
   type CachedPage,
+  jobPageFor,
   PageCacheStore,
   type PageKey,
   scrapeJobPage,
   scrapeSourceListings,
 } from "./page-cache";
 import { liteParseText, makePdfParser, PdfParser } from "./pdf";
+import { HostLimiter, makeHostLimiter } from "./sources/http";
 
 const jobAd = new Uint8Array(
   await Bun.file(new URL("../../test/fixtures/job-ad.pdf", import.meta.url)).arrayBuffer(),
@@ -36,7 +38,11 @@ const listing: Listing = {
   locations: ["Bengaluru"],
   experienceMinYears: 3,
   experienceMaxYears: null,
+  remote: null,
+  postedAt: null,
 };
+
+const pageSource = (url: string) => ({ url, kind: "PAGE", adapterKey: null }) as const;
 
 const memoryStore = () => {
   const rows = new Map<string, CachedPage>();
@@ -64,7 +70,7 @@ const fakeFirecrawl = (fail = false, markdown?: string) => {
     scrapeListings: (url) =>
       Effect.sync(() => {
         scraped.push(url);
-        return [listing];
+        return { listings: [listing], rawHtml: null, links: [] };
       }),
   });
   return { scraped, firecrawl };
@@ -89,10 +95,11 @@ const setup = (options: { fail?: boolean; markdown?: string; respond?: Respond }
     Layer.succeed(Firecrawl, fake.firecrawl),
     Layer.succeed(HttpFetch, http),
     Layer.succeed(PdfParser, makePdfParser(liteParseText)),
+    Layer.effect(HostLimiter, makeHostLimiter(0)),
     TestClock.layer(),
   );
   const run = <A, E>(
-    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser>,
+    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser | HostLimiter>,
   ) => program.pipe(Effect.provide(layer), Effect.runPromise);
   return { ...memory, ...fake, requests, run };
 };
@@ -114,21 +121,21 @@ describe("page cache", () => {
     const { run, scraped } = setup();
     const url = "https://example.com/jobs";
     const program = Effect.gen(function* () {
-      const first = yield* scrapeSourceListings("alice", url);
+      const first = yield* scrapeSourceListings("alice", pageSource(url));
       yield* TestClock.adjust("14 minutes");
-      yield* scrapeSourceListings("alice", url);
+      yield* scrapeSourceListings("alice", pageSource(url));
       yield* TestClock.adjust("1 minute");
-      yield* scrapeSourceListings("alice", url);
+      yield* scrapeSourceListings("alice", pageSource(url));
       return first;
     });
-    expect(await run(program)).toEqual([listing]);
+    expect(await run(program)).toEqual({ listings: [listing], embedded: null });
     expect(scraped).toEqual([url, url]);
   });
 
   test("stores the listings expiry 15 minutes after the scrape", async () => {
     const { run, rows, id } = setup();
     const url = "https://example.com/jobs";
-    await run(scrapeSourceListings("alice", url));
+    await run(scrapeSourceListings("alice", pageSource(url)));
     const row = rows.get(id({ userId: "alice", url, kind: "SOURCE_LISTING" }));
     expect(row?.expiresAt?.getTime()).toBe(15 * 60 * 1000);
   });
@@ -147,6 +154,21 @@ describe("page cache", () => {
     expect(rows.size).toBe(0);
   });
 
+  test("reads listings cached before remote and postedAt existed", async () => {
+    const { run, rows, id, scraped } = setup();
+    const url = "https://example.com/jobs";
+    const { remote: _remote, postedAt: _postedAt, ...old } = listing;
+    rows.set(id({ userId: "alice", url, kind: "SOURCE_LISTING" }), {
+      content: [{ ...old, locations: [...old.locations] }],
+      expiresAt: null,
+    });
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
+      listings: [listing],
+      embedded: null,
+    });
+    expect(scraped).toEqual([]);
+  });
+
   test("scrapes again when a cached row cannot be read", async () => {
     const { run, rows, id, scraped } = setup();
     const url = "https://example.com/jobs";
@@ -154,8 +176,52 @@ describe("page cache", () => {
       content: [{ title: "Old shape" }],
       expiresAt: null,
     });
-    expect(await run(scrapeSourceListings("alice", url))).toEqual([listing]);
+    expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
+      listings: [listing],
+      embedded: null,
+    });
     expect(scraped).toEqual([url]);
+  });
+});
+
+describe("job pages for listings", () => {
+  const jobUrl = "https://jobs.smartrecruiters.com/BoschGroup/744000154933569";
+  const apiUrl = "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000154933569";
+  const job: Listing = { ...listing, url: jobUrl, title: "Intern", company: "Bosch Group" };
+
+  test("uses the listing's own job ad without scraping or caching", async () => {
+    const { run, scraped, requests, rows } = setup();
+    const page = await run(jobPageFor("alice", { ...job, description: "Ad text" }, "LEVER"));
+    expect(page).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
+    expect([...scraped, ...requests]).toEqual([]);
+    expect(rows.size).toBe(0);
+  });
+
+  test("reads a missing job ad from the source's API once", async () => {
+    const posting = await Bun.file(
+      new URL("../../test/fixtures/ats/smartrecruiters-posting.json", import.meta.url),
+    ).text();
+    const { run, scraped, requests } = setup({
+      respond: (url) =>
+        url === apiUrl
+          ? { status: 200, headers: new Headers(), body: new TextEncoder().encode(posting) }
+          : null,
+    });
+    const program = Effect.all([
+      jobPageFor("alice", job, "SMARTRECRUITERS"),
+      jobPageFor("alice", job, "SMARTRECRUITERS"),
+    ]);
+    const [first, second] = await run(program);
+    expect(first).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
+    expect(second).toBe(first);
+    expect(requests).toEqual([`GET ${apiUrl}`]);
+    expect(scraped).toEqual([]);
+  });
+
+  test("scrapes the job page when the source cannot supply the ad", async () => {
+    const { run, scraped } = setup();
+    expect(await run(jobPageFor("alice", job, "PAGE"))).toBe("Markdown 1");
+    expect(scraped).toEqual([jobUrl]);
   });
 });
 

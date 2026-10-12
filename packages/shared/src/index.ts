@@ -37,6 +37,53 @@ const NonNegative = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 export const CreateJobSource = Schema.Struct({ url: HttpUrl });
 export type CreateJobSource = typeof CreateJobSource.Type;
 
+export const SourceKind = Schema.Literals([
+  "GREENHOUSE",
+  "LEVER",
+  "ASHBY",
+  "SMARTRECRUITERS",
+  "RECRUITEE",
+  "SEARCH",
+  "PAGE",
+]);
+export type SourceKind = typeof SourceKind.Type;
+
+// Kinds read from a public ATS API, keyed by the board token or company slug.
+export const atsKinds: ReadonlySet<SourceKind> = new Set([
+  "GREENHOUSE",
+  "LEVER",
+  "ASHBY",
+  "SMARTRECRUITERS",
+  "RECRUITEE",
+]);
+
+export const sourceKindLabels: Record<SourceKind, string> = {
+  GREENHOUSE: "Greenhouse",
+  LEVER: "Lever",
+  ASHBY: "Ashby",
+  SMARTRECRUITERS: "SmartRecruiters",
+  RECRUITEE: "Recruitee",
+  SEARCH: "Search",
+  PAGE: "Web page",
+};
+
+// Search sources are created from a query, not by switching an existing source.
+export const UpdateJobSource = Schema.Struct({
+  kind: SourceKind.check(
+    Schema.makeFilter((kind) => kind !== "SEARCH", {
+      message: "A source cannot be switched to search",
+    }),
+  ),
+  adapterKey: Schema.NullOr(Schema.Trim),
+}).check(
+  Schema.makeFilter((source) =>
+    atsKinds.has(source.kind) && !source.adapterKey
+      ? { path: ["adapterKey"], issue: "Enter the board name for this job board" }
+      : undefined,
+  ),
+);
+export type UpdateJobSource = typeof UpdateJobSource.Type;
+
 export const StartRun = Schema.Struct({
   sourceIds: Schema.NonEmptyArray(Schema.NonEmptyString),
 });
