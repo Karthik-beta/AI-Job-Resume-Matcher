@@ -87,7 +87,7 @@ export const userPrompt = ({ resume, jobPage, requirements }: MatchInput) => {
   return `${content}Determine if this candidate is a good fit and explain why briefly.`;
 };
 
-// OpenRouter answers a request no endpoint can serve, such as one over max_price, with a 404 or 400.
+// OpenRouter answers a request no endpoint can serve, such as one over max_price, with 404 or 400.
 const priceCapPattern = /price|no endpoints/i;
 
 const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
@@ -113,7 +113,7 @@ export const makeMatchEvaluator = (model: string, routing: Routing) =>
     const openRouter = yield* OpenRouterClient.OpenRouterClient;
 
     return MatchEvaluator.of({
-      preflight: checkAccess(openRouter.client.httpClient, model),
+      preflight: checkAccess(openRouter.client.httpClient, model, routing),
       evaluate: (input) =>
         openRouter
           .createChatCompletion({

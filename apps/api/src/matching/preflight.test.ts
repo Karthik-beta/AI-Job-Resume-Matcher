@@ -4,8 +4,9 @@ import { Effect, Layer, Redacted } from "effect";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { ModelUnsupported } from "./errors";
 import { MatchEvaluator, makeMatchEvaluator } from "./evaluate";
-import { defaultRouting } from "./routing";
+import { defaultRouting, type Routing } from "./routing";
 
 const model = "example/test-model";
 const keyUrl = "https://openrouter.ai/api/v1/key";
@@ -20,14 +21,22 @@ interface SentRequest {
 }
 
 const regularKey = { body: { data: { is_management_key: false, is_provisioning_key: false } } };
-const endpoints = (...supported: string[][]) => ({
-  body: {
-    data: { endpoints: supported.map((parameters) => ({ supported_parameters: parameters })) },
-  },
+// Shaped like GPT-6 Luna's OpenAI flex endpoint, priced exactly at the default cap.
+const endpoint = (overrides: Record<string, unknown> = {}) => ({
+  provider_name: "OpenAI",
+  tag: "openai/flex",
+  pricing: { prompt: "0.00000005", completion: "0.00000025" },
+  supported_parameters: ["reasoning", "max_tokens", "response_format", "structured_outputs"],
+  ...overrides,
 });
-const compatible = endpoints(["response_format", "structured_outputs", "temperature"]);
+const standardPricing = { prompt: "0.0000001", completion: "0.0000005" };
+const endpoints = (...list: object[]) => ({ body: { data: { endpoints: list } } });
+const compatible = endpoints(endpoint(), endpoint({ tag: "openai", pricing: standardPricing }));
 
-const preflight = async (replies: { key: Reply; endpoints?: Reply }) => {
+const preflight = async (
+  replies: { key: Reply; endpoints?: Reply },
+  options: { model?: string; routing?: Routing } = {},
+) => {
   const sent: SentRequest[] = [];
   const http = HttpClient.make((request, url) =>
     Effect.suspend(() => {
@@ -52,7 +61,8 @@ const preflight = async (replies: { key: Reply; endpoints?: Reply }) => {
       );
     }),
   );
-  const layer = Layer.effect(MatchEvaluator, makeMatchEvaluator(model, defaultRouting)).pipe(
+  const evaluator = makeMatchEvaluator(options.model ?? model, options.routing ?? defaultRouting);
+  const layer = Layer.effect(MatchEvaluator, evaluator).pipe(
     Layer.provide(OpenRouterClient.layer({ apiKey: Redacted.make("test-key") })),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, http)),
   );
@@ -64,8 +74,11 @@ const preflight = async (replies: { key: Reply; endpoints?: Reply }) => {
   return { outcome, sent };
 };
 
-const failureOf = async (replies: { key: Reply; endpoints?: Reply }) => {
-  const { outcome, sent } = await preflight(replies);
+const failureOf = async (
+  replies: { key: Reply; endpoints?: Reply },
+  options: { routing?: Routing } = {},
+) => {
+  const { outcome, sent } = await preflight(replies, options);
   if (outcome._tag !== "Failure") throw new Error("Expected a failure");
   return { error: outcome.failure, sent };
 };
@@ -89,16 +102,102 @@ describe("preflight", () => {
     },
   );
 
+  test("checks a model variant against the base model's endpoints", async () => {
+    const { outcome, sent } = await preflight(
+      { key: regularKey, endpoints: compatible },
+      { model: `${model}:floor` },
+    );
+    expect(outcome._tag).toBe("Success");
+    expect(sent[1]?.url).toBe(endpointsUrl);
+  });
+
   test.each([
-    ["no provider supports structured output", endpoints(["temperature", "tools"])],
+    ["no endpoint is tagged flex", endpoints(endpoint({ tag: "openai" }))],
+    ["the provider only matches the tag", endpoints(endpoint({ provider_name: "OpenAI Flex" }))],
+    [
+      "the provider name differs in case",
+      endpoints(endpoint({ provider_name: "openai", tag: "x" })),
+    ],
+    ["the endpoint has no pricing", endpoints(endpoint({ pricing: undefined }))],
+  ])("passes when %s", async (_, reply) => {
+    const { outcome } = await preflight({ key: regularKey, endpoints: reply });
+    expect(outcome._tag).toBe("Success");
+  });
+
+  test("does not require flex for another service tier", async () => {
+    const { outcome } = await preflight(
+      {
+        key: regularKey,
+        endpoints: endpoints(
+          endpoint({ provider_name: "Azure", tag: "azure/flex" }),
+          endpoint({ tag: "openai" }),
+        ),
+      },
+      { routing: { ...defaultRouting, serviceTier: "default" } },
+    );
+    expect(outcome._tag).toBe("Success");
+  });
+
+  const noStructuredOutput =
+    `The model '${model}' has no provider supporting JSON Schema structured output. ` +
+    "Choose a compatible model.";
+
+  test.each([
+    [
+      "no provider supports structured output",
+      endpoints(endpoint({ supported_parameters: ["temperature", "tools"] })),
+      noStructuredOutput,
+    ],
     [
       "the parameters are split across providers",
-      endpoints(["response_format", "structured_outputs"], ["temperature"]),
+      endpoints(
+        endpoint({ supported_parameters: ["response_format"] }),
+        endpoint({ supported_parameters: ["structured_outputs"] }),
+      ),
+      noStructuredOutput,
     ],
-    ["the model has no endpoints", endpoints()],
-  ])("rejects the model when %s", async (_, reply) => {
+    ["the model has no endpoints", endpoints(), noStructuredOutput],
+    [
+      "no allowed provider serves it",
+      endpoints(endpoint({ provider_name: "Azure", tag: "azure/flex" })),
+      `The model '${model}' has no endpoint from the allowed providers (openai) supporting ` +
+        "JSON Schema structured output. Change OPENROUTER_PROVIDERS or the model.",
+    ],
+    [
+      "only another provider offers flex",
+      endpoints(
+        endpoint({ tag: "openai", pricing: standardPricing }),
+        endpoint({ provider_name: "Azure", tag: "azure/flex" }),
+      ),
+      `The model '${model}' has no flex endpoint from the allowed providers (openai). ` +
+        "Change OPENROUTER_PROVIDERS, OPENROUTER_SERVICE_TIER or the model.",
+    ],
+    [
+      "the flex endpoint costs more than the cap",
+      endpoints(endpoint({ pricing: { prompt: "0.00000005", completion: "0.0000003" } })),
+      `The model '${model}' has no flex endpoint from the allowed providers (openai) under the ` +
+        "price cap (prompt $0.05, completion $0.25 per million tokens). Raise " +
+        "OPENROUTER_MAX_PRICE_PROMPT and OPENROUTER_MAX_PRICE_COMPLETION or choose another model.",
+    ],
+  ])("rejects the model when %s", async (_, reply, message) => {
     const { error } = await failureOf({ key: regularKey, endpoints: reply });
-    expect(error).toMatchObject({ _tag: "ModelUnsupported", model });
+    expect(error).toEqual(new ModelUnsupported({ model, message }));
+  });
+
+  test("checks the price cap without flex on another service tier", async () => {
+    const { error } = await failureOf(
+      { key: regularKey, endpoints: endpoints(endpoint({ pricing: standardPricing })) },
+      { routing: { ...defaultRouting, serviceTier: "default" } },
+    );
+    expect(error).toEqual(
+      new ModelUnsupported({
+        model,
+        message:
+          `The model '${model}' has no endpoint from the allowed providers (openai) under the ` +
+          "price cap (prompt $0.05, completion $0.25 per million tokens). Raise " +
+          "OPENROUTER_MAX_PRICE_PROMPT and OPENROUTER_MAX_PRICE_COMPLETION or choose another model.",
+      }),
+    );
   });
 
   test("maps a rejected key to an auth error without checking the model", async () => {
