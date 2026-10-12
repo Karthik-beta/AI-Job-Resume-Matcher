@@ -8,6 +8,7 @@ import { pdfParserLayer } from "../matching/pdf";
 import { resumeSourceLayer } from "../matching/resume-source";
 import { routingFromEnv } from "../matching/routing";
 import { hostLimiterLayer } from "../matching/sources/http";
+import { titleTriageLayer } from "../matching/triage";
 
 // Only the worker with live providers needs these keys.
 const ProviderKeys = Schema.Struct({
@@ -32,6 +33,7 @@ export const liveProvidersLayer = (model: string) => {
     resumeSourceLayer.pipe(Layer.provideMerge(documents)),
     matchEvaluatorLayer(openRouter),
     listingExtractorLayer(openRouter),
+    titleTriageLayer(openRouter),
     discordNotifierLayer,
     hostLimiterLayer,
   );

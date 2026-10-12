@@ -16,6 +16,7 @@ import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
 import { hostLimiterLayer } from "../matching/sources/http";
 import { markdownLinks } from "../matching/sources/page-links";
+import { TitleTriage } from "../matching/triage";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -122,6 +123,11 @@ export const fakeEvaluator = MatchEvaluator.of({
   },
 });
 
+// Every title is a strong fit, so triage keeps every job in listing order.
+export const fakeTitleTriage = TitleTriage.of({
+  score: ({ jobs }) => Effect.succeed(jobs.map(({ id }) => ({ id, score: 3, reason: null }))),
+});
+
 export const fakeNotifier = Notifier.of({
   notifyMatch: (webhookUrl, alert) =>
     isDiscordWebhookUrl(webhookUrl)
@@ -135,6 +141,7 @@ export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(HttpFetch, fakeHttpFetch),
   Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
+  Layer.succeed(TitleTriage, fakeTitleTriage),
   Layer.succeed(ListingExtractor, fakeListingExtractor),
   Layer.succeed(Notifier, fakeNotifier),
   hostLimiterLayer,

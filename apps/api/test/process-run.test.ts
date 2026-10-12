@@ -7,6 +7,7 @@ import {
   ModelUnsupported,
   NotifyFailed,
   OpenRouterAuthError,
+  OpenRouterRequestFailed,
 } from "../src/matching/errors";
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
@@ -15,6 +16,7 @@ import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
 import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
+import { TitleTriage } from "../src/matching/triage";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
@@ -92,8 +94,21 @@ describe("process run", () => {
       preflight?: Effect.Effect<void, ModelUnsupported>;
       failAlerts?: boolean;
       resumeHash?: string;
+      // Scores by job title (3 when missing), or the error the triage request fails with.
+      triage?: Record<string, number> | OpenRouterRequestFailed | OpenRouterAuthError;
     },
   ) => {
+    const triaged: string[][] = [];
+    const triage = TitleTriage.of({
+      score: ({ jobs }) => {
+        triaged.push(jobs.map(({ title }) => title));
+        const scripted = options.triage ?? {};
+        if (scripted instanceof Error) return Effect.fail(scripted);
+        return Effect.succeed(
+          jobs.map(({ id, title }) => ({ id, score: scripted[title] ?? 3, reason: null })),
+        );
+      },
+    });
     const evaluated: string[] = [];
     const resumeHashes = new Set<string | undefined>();
     const scraped: string[] = [];
@@ -156,6 +171,7 @@ describe("process run", () => {
       ),
       pageCacheStoreLayer(prisma),
       Layer.succeed(Notifier, notifier),
+      Layer.succeed(TitleTriage, triage),
       Layer.succeed(
         ResumeSource,
         ResumeSource.of({
@@ -168,7 +184,7 @@ describe("process run", () => {
     );
     await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
-    return { run, evaluated, scraped, alerts, resumeHashes };
+    return { run, evaluated, scraped, alerts, resumeHashes, triaged };
   };
 
   const jobUrl = (id: string) => `https://jobs.example.com/${id}`;
@@ -427,6 +443,65 @@ describe("process run", () => {
         where: { userId },
         data: { titleInclude: [], titleExclude: [] },
       });
+    }
+  });
+
+  it("reads only the titles triage ranks as likely fits, best first", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 2, "Job 3": 1, "Job 4": 3, "Job 5": 0 };
+    const { run, evaluated, triaged } = await runWith(await startRun(), { triage });
+
+    expect(triaged).toEqual([["Job 1", "Job 3", "Job 4", "Job 5"]]);
+    expect(evaluated).toEqual([jobUrl("4"), jobUrl("1")]);
+    expect(run).toMatchObject({ status: "COMPLETED", eligible: 4, checked: 2, failed: 0 });
+    const skipped = await prisma.jobResult.findMany({
+      where: { runId: run.id, skipped: "TRIAGE" },
+      orderBy: { jobUrl: "asc" },
+      select: { jobUrl: true, isMatch: true, reason: true, error: true },
+    });
+    expect(skipped).toEqual([
+      { jobUrl: jobUrl("3"), isMatch: null, reason: "Skipped by title triage", error: null },
+      { jobUrl: jobUrl("5"), isMatch: null, reason: "Skipped by title triage", error: null },
+    ]);
+
+    // Rejected jobs are settled for this context, so they are not triaged again.
+    const again = await runWith(await startRun(), { triage });
+    expect(again.triaged).toEqual([]);
+    expect(again.evaluated).toEqual([]);
+  });
+
+  it("limits the run to the best-ranked jobs", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 2, "Job 3": 2, "Job 4": 3, "Job 5": 3 };
+    const { evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([jobUrl("4"), jobUrl("5"), jobUrl("1")]);
+  });
+
+  it("checks jobs without triage when the triage request fails", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = new OpenRouterRequestFailed({ status: 500, message: "Upstream error" });
+    const { run, evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    expect(run).toMatchObject({ status: "COMPLETED", checked: 3 });
+  });
+
+  it("stops the run when triage is refused for the API key", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = new OpenRouterAuthError({ status: 401, message: "User not found." });
+    const { run, evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([]);
+    expect(run).toMatchObject({ status: "STOPPED", stopReason: "User not found." });
+  });
+
+  it("skips triage when it is turned off", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.settings.update({ where: { userId }, data: { triageEnabled: false } });
+    try {
+      const { evaluated, triaged } = await runWith(await startRun(), { triage: { "Job 1": 0 } });
+      expect(triaged).toEqual([]);
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { triageEnabled: true } });
     }
   });
 

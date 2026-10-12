@@ -24,6 +24,8 @@ model Settings {
   // Job titles must not contain any of these.
   titleExclude      String[] @default([])
   maxJobsPerRun     Int      @default(5) // 1-20
+  // Rank job titles against the resume before reading job pages.
+  triageEnabled     Boolean  @default(true)
   scheduleMinutes   Int? // null = no scheduled checks
 }
 

@@ -16,6 +16,7 @@ import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
 import type { HostLimiter } from "../matching/sources/http";
 import { acceptsTitle } from "../matching/title-filters";
+import { type TitleTriage, triageListings } from "../matching/triage";
 import { requirementsOf, titleFiltersOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
@@ -28,9 +29,21 @@ export type RunServices =
   | PdfParser
   | ResumeSource
   | MatchEvaluator
+  | TitleTriage
   | Notifier;
 
 const query = <A>(run: () => Promise<A>) => Effect.promise(run);
+
+const triageReason = "Skipped by title triage";
+
+// The listing details a JobResult keeps.
+const resultListing = (job: Listing) => ({
+  title: job.title,
+  company: job.company,
+  locations: [...job.locations],
+  expMinYears: job.experienceMinYears,
+  expMaxYears: job.experienceMaxYears,
+});
 
 type Verdict = Pick<JobResult, "isMatch" | "reason" | "skipped">;
 
@@ -154,8 +167,43 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
         select: { jobUrl: true },
       }),
     );
+    // Skipped jobs (expired, or rejected by triage) are settled too.
     const done = new Set(analysed.map(({ jobUrl }) => jobUrl));
-    const selected = eligible.filter(({ url }) => !done.has(url)).slice(0, settings.maxJobsPerRun);
+    const pending = eligible.filter(({ url }) => !done.has(url));
+
+    let ranked: readonly Listing[] = pending;
+    if (settings.triageEnabled && pending.length > 0) {
+      const triaged = yield* triageListings(resume.text, pending).pipe(Effect.result);
+      if (triaged._tag === "Failure") {
+        if (stopsRun(triaged.failure)) return yield* finish("STOPPED", triaged.failure.message);
+        // Triage only saves credits, so the run goes on without it.
+        yield* Effect.logWarning(`Title triage failed: ${triaged.failure.message}`);
+      } else {
+        ranked = triaged.success.kept;
+        // Recorded without a verdict, so they are shown on the run page and not triaged again.
+        yield* query(() =>
+          prisma.$transaction(
+            triaged.success.rejected.map(({ listing: job, reason }) => {
+              const fields = {
+                runId,
+                ...resultListing(job),
+                isMatch: null,
+                reason: reason ? `${triageReason}: ${reason}` : triageReason,
+                error: null,
+                skipped: "TRIAGE" as const,
+                matchSaved: false,
+              };
+              return prisma.jobResult.upsert({
+                where: { userId_contextKey_jobUrl: { userId, contextKey, jobUrl: job.url } },
+                create: { userId, contextKey, jobUrl: job.url, ...fields },
+                update: fields,
+              });
+            }),
+          ),
+        );
+      }
+    }
+    const selected = ranked.slice(0, settings.maxJobsPerRun);
 
     for (const job of selected) {
       const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
@@ -186,14 +234,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
         outcome._tag === "Success"
           ? { ...outcome.success.verdict, error: null }
           : { isMatch: null, reason: null, skipped: null, error: outcome.failure.message };
-      const read = outcome._tag === "Success" ? outcome.success.enriched : job;
-      const listing = {
-        title: read.title,
-        company: read.company,
-        locations: [...read.locations],
-        expMinYears: read.experienceMinYears,
-        expMaxYears: read.experienceMaxYears,
-      };
+      const listing = resultListing(outcome._tag === "Success" ? outcome.success.enriched : job);
       // A failed save keeps the verdict without an error, so the job is not analysed again
       // and the match can be saved later from the run page.
       const saved =

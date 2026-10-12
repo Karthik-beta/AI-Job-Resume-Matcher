@@ -148,6 +148,8 @@ export const UpdateSettings = Schema.Struct({
       { message: "Jobs per run must be between 1 and 20" },
     ),
   ),
+  // Rank job titles against the resume first, and read only the likely fits.
+  triageEnabled: Schema.Boolean,
   scheduleMinutes: Schema.NullOr(
     Schema.Int.check(Schema.isGreaterThanOrEqualTo(15, { message: "Use 15 minutes or more" })),
   ),
@@ -174,5 +176,6 @@ export const defaultSettings: UpdateSettings = {
   titleInclude: [],
   titleExclude: [],
   maxJobsPerRun: 5,
+  triageEnabled: true,
   scheduleMinutes: null,
 };

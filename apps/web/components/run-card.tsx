@@ -15,15 +15,18 @@ export const statusLabels: Record<RunStatus, string> = {
 
 function verdictOf(result: JobResult): Verdict {
   if (result.skipped === "EXPIRED") return "expired";
+  if (result.skipped === "TRIAGE") return "skipped";
   if (result.error !== null || result.isMatch === null) return "failed";
   return result.isMatch ? "match" : "no-match";
 }
 
+const isTriaged = (result: JobResult) => result.skipped === "TRIAGE";
+
 // The run stores how many jobs passed the filters, not how many it picked,
-// so while it runs the bar measures against the run size.
+// so while it runs the bar measures against the run size, less the jobs triage skipped.
 function progressValue(run: RunDetail, maxJobsPerRun: number) {
   if (!isActive(run.status)) return 100;
-  const planned = Math.min(run.eligible, maxJobsPerRun);
+  const planned = Math.min(run.eligible - run.results.filter(isTriaged).length, maxJobsPerRun);
   return planned === 0 ? null : (run.checked / planned) * 100;
 }
 
@@ -38,6 +41,9 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun: number }) {
   const startedAt = new Date(run.createdAt).toLocaleString();
+  const triaged = run.results.filter(isTriaged);
+  // Checked jobs first; the ones triage skipped follow.
+  const results = [...run.results.filter((result) => !isTriaged(result)), ...triaged];
 
   return (
     <Card className="[--card-spacing:--spacing(5)]">
@@ -53,6 +59,9 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
           <Stat label="Checked" value={run.checked} />
           <Stat label="Failed" value={run.failed} />
         </dl>
+        {triaged.length > 0 && (
+          <p className="text-sm text-muted-foreground">Skipped by title triage: {triaged.length}</p>
+        )}
         <Progress
           value={progressValue(run, maxJobsPerRun)}
           aria-label="Run progress"
@@ -67,7 +76,7 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
       {run.results.length > 0 && (
         <CardContent className="px-0">
           <ul>
-            {run.results.map((result, index) => (
+            {results.map((result, index) => (
               <li key={result.id}>
                 {index > 0 && <Separator />}
                 <div className="grid gap-1.5 px-(--card-spacing) py-4">
