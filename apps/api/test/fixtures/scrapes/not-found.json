@@ -1,0 +1,7 @@
+{
+  "markdown": "# Page not found\n\nThe job you are looking for has been filled or is no longer available. Browse our [open roles](https://careers.example.com/jobs) instead.",
+  "metadata": {
+    "title": "Page not found | Example",
+    "statusCode": 404
+  }
+}

@@ -75,6 +75,13 @@ describe("fake providers", () => {
     const failed = await scrape("https://jobs.example.com/x?fake-error=429");
     const tag = mode === "local" ? "ScrapeFailed" : "FirecrawlBlocked";
     expect(failed).toMatchObject({ _tag: "Failure", failure: { _tag: tag } });
+    // `?fake-blocked` serves the local instance a bot check, which hybrid retries on the cloud.
+    const blocked = await scrape("https://jobs.example.com/backend-payments?fake-blocked");
+    expect(blocked).toMatchObject(
+      mode === "local"
+        ? { _tag: "Failure", failure: { _tag: "ScrapeFailed", status: 403 } }
+        : { _tag: "Success", success: { usage: { via: "cloud", credits: 1 } } },
+    );
   });
 
   it("blocks requests to real providers", async () => {

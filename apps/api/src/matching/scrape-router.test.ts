@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { Effect, Layer } from "effect";
+import { ScrapeFailed } from "./errors";
 import {
   Firecrawl,
   FirecrawlRequestFailed,
@@ -9,11 +10,13 @@ import {
   type Via,
 } from "./firecrawl";
 import {
+  type CloudBudget,
   checkLocalFirecrawl,
   firecrawlConfigFrom,
   firecrawlLayer,
   firecrawlModeFrom,
   makeScrapeRouter,
+  needsCloudMessage,
   type RouterConfig,
   ScrapeHealth,
 } from "./scrape-router";
@@ -172,6 +175,10 @@ describe("cloud mode", () => {
   });
 });
 
+const challenge: ScrapedPage = { markdown: "Just a moment...", metadata: { statusCode: 403 } };
+const notFound: ScrapedPage = { markdown: "Page not found", metadata: { statusCode: 404 } };
+const thinShell: ScrapedPage = { markdown: "Loading…", metadata: { statusCode: 200 } };
+
 describe("local mode", () => {
   const router = (replies: Record<string, Reply> = {}) => {
     const local = fakeBackend("local", replies);
@@ -185,12 +192,31 @@ describe("local mode", () => {
     expect(local.calls[0]?.request).not.toHaveProperty("proxy");
   });
 
-  // Local has no credits or plan limit, so no status stops the run.
-  test.each([401, 402, 429, null])("fails just the page on %p", async (status) => {
-    const { firecrawl } = router({ [url]: failure(status, "Request failed") });
-    expect(await run(firecrawl.scrapeJob(url))).toMatchObject({
+  test.each<[string, Reply, number | null, string]>([
+    ["a challenge", challenge, 403, "The site blocked the local scraper (HTTP 403)."],
+    [
+      "a thin page",
+      thinShell,
+      200,
+      "The site served the local scraper a bot check or a page without its content.",
+    ],
+    ["a missing page", notFound, 404, "The page is gone (HTTP 404)."],
+    [
+      "a bad request",
+      { markdown: jobText, metadata: { statusCode: 400 } },
+      400,
+      "The page returned HTTP 400.",
+    ],
+    // Local has no credits or plan limit, so no status stops the run.
+    ["a 401", failure(401, "Unauthorized"), 401, "Local Firecrawl: Unauthorized"],
+    ["a 402", failure(402, "Payment required"), 402, "Local Firecrawl: Payment required"],
+    ["a 429", failure(429, "Too many requests"), 429, "Local Firecrawl: Too many requests"],
+    ["a timeout", failure(null, "timeout"), null, "Local Firecrawl: timeout"],
+  ])("fails just the page on %s", async (_name, reply, status, message) => {
+    const { firecrawl } = router({ [url]: reply });
+    expect(await run(firecrawl.scrapeJob(url))).toEqual({
       ok: false,
-      error: { _tag: "ScrapeFailed", status, message: "Local Firecrawl: Request failed" },
+      error: new ScrapeFailed({ status, message }),
     });
   });
 
@@ -206,12 +232,17 @@ describe("local mode", () => {
 });
 
 describe("hybrid mode", () => {
-  const router = (local: Record<string, Reply> = {}, cloud: Record<string, Reply> = {}) => {
+  const router = (
+    local: Record<string, Reply> = {},
+    cloud: Record<string, Reply> = {},
+    budget?: CloudBudget,
+  ) => {
     const instances = { local: fakeBackend("local", local), cloud: fakeBackend("cloud", cloud) };
     const config: RouterConfig = {
       mode: "hybrid",
       local: instances.local.backend,
       cloud: instances.cloud.backend,
+      ...(budget ? { budget } : {}),
     };
     return { firecrawl: makeScrapeRouter(config), ...instances };
   };
@@ -223,17 +254,81 @@ describe("hybrid mode", () => {
     expect(cloud.calls).toEqual([]);
   });
 
-  test("retries a failed local scrape on the cloud with the auto proxy", async () => {
-    const { firecrawl, cloud } = router({ [url]: failure(null, "timeout") });
+  test.each<[string, Reply]>([
+    ["a challenge", challenge],
+    ["a thin job page", thinShell],
+    ["a timeout", failure(null, "timeout")],
+    ["an engine failure", failure(500, "All scraping engines failed")],
+  ])("retries %s on the cloud with the auto proxy", async (_name, reply) => {
+    const { firecrawl, cloud } = router({ [url]: reply });
     const result = await run(firecrawl.scrapeJob(url));
     expect(result).toMatchObject({ ok: true, value: { usage: { via: "cloud", credits: 1 } } });
-    expect(cloud.calls[0]?.request).toMatchObject({ proxy: "auto" });
+    expect(cloud.calls).toEqual([{ url, request: expect.objectContaining({ proxy: "auto" }) }]);
   });
 
-  test("maps on the cloud when the local map fails", async () => {
-    const { firecrawl } = router({ "https://acme.com": failure(null) });
-    const result = await run(firecrawl.map("https://acme.com", { search: "job", limit: 5 }));
+  test.each<[string, Reply, string]>([
+    ["a missing page", notFound, "The page is gone (HTTP 404)."],
+    ["a request error", failure(400, "Bad URL"), "Local Firecrawl: Bad URL"],
+  ])("fails %s without trying the cloud", async (_name, reply, message) => {
+    const { firecrawl, cloud } = router({ [url]: reply });
+    expect(await run(firecrawl.scrapeJob(url))).toMatchObject({
+      ok: false,
+      error: { _tag: "ScrapeFailed", message },
+    });
+    expect(cloud.calls).toEqual([]);
+  });
+
+  test("fails just the page when the cloud is out of credits", async () => {
+    const { firecrawl } = router({ [url]: challenge }, { [url]: failure(402) });
+    expect(await run(firecrawl.scrapeJob(url))).toEqual({
+      ok: false,
+      error: new ScrapeFailed({ status: 402, message: needsCloudMessage }),
+    });
+  });
+
+  test.each([401, 429])("stops the run on a cloud %p", async (status) => {
+    const { firecrawl } = router({ [url]: challenge }, { [url]: failure(status) });
+    expect(await run(firecrawl.scrapeJob(url))).toMatchObject({
+      ok: false,
+      error: { _tag: "FirecrawlBlocked", status },
+    });
+  });
+
+  test("fails the page when the cloud is blocked too", async () => {
+    const { firecrawl } = router({ [url]: challenge }, { [url]: challenge });
+    expect(await run(firecrawl.scrapeJob(url))).toMatchObject({
+      ok: false,
+      error: { _tag: "ScrapeFailed", message: "The site blocked the cloud scraper (HTTP 403)." },
+    });
+  });
+
+  test("asks the budget before the cloud and reports what was spent", async () => {
+    const spent: number[] = [];
+    const budget = (allows: boolean): CloudBudget => ({
+      allows: Effect.succeed(allows),
+      spent: (credits) => Effect.sync(() => void spent.push(credits)),
+    });
+    const refused = router({ [url]: challenge }, {}, budget(false));
+    expect(await run(refused.firecrawl.scrapeJob(url))).toMatchObject({
+      ok: false,
+      error: { message: needsCloudMessage },
+    });
+    expect(refused.cloud.calls).toEqual([]);
+    const allowed = router({ [url]: challenge }, {}, budget(true));
+    expect(await run(allowed.firecrawl.scrapeJob(url))).toMatchObject({ ok: true });
+    expect(spent).toEqual([1]);
+  });
+
+  test("maps on the cloud only when the local map is blocked", async () => {
+    const blocked = router({ "https://acme.com": failure(null) });
+    const result = await run(
+      blocked.firecrawl.map("https://acme.com", { search: "job", limit: 5 }),
+    );
     expect(result).toMatchObject({ ok: true, value: { usage: { via: "cloud", credits: 1 } } });
+    const local = router();
+    expect(
+      await run(local.firecrawl.map("https://acme.com", { search: "job", limit: 5 })),
+    ).toMatchObject({ ok: true, value: { usage: { via: "local", credits: 0 } } });
   });
 });
 

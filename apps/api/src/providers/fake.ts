@@ -15,6 +15,7 @@ import {
   FirecrawlRequestFailed,
   Listing,
   type ScrapeBackend,
+  type ScrapedPage,
   type ScrapeRequest,
   type Via,
 } from "../matching/firecrawl";
@@ -82,11 +83,21 @@ const fixturePage = (url: string, request: ScrapeRequest) =>
     return { markdown, links: listing ? markdownLinks(markdown).map((link) => link.url) : [] };
   });
 
-// Both instances serve the fixtures. No map has job links, so sources that use one fall
-// back to their page.
+// A bot check, as Cloudflare serves it to a scraper it blocks.
+const challengePage: ScrapedPage = {
+  markdown: "Just a moment...\n\nVerifying you are human. This may take a few seconds.",
+  metadata: { title: "Just a moment...", statusCode: 403 },
+};
+
+// Both instances serve the fixtures, except that `?fake-blocked` pages block the local one
+// (so hybrid runs retry them on the cloud). No map has job links, so sources that use one
+// fall back to their page.
 const fakeBackend = (via: Via): ScrapeBackend => ({
   via,
-  scrape: fixturePage,
+  scrape: (url, request) =>
+    via === "local" && URL.canParse(url) && new URL(url).searchParams.has("fake-blocked")
+      ? Effect.succeed(challengePage)
+      : fixturePage(url, request),
   map: (url) => fixturePage(url, { formats: [] }).pipe(Effect.as({ links: [] })),
 });
 

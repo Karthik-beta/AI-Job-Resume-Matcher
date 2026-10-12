@@ -1,4 +1,5 @@
 import { Context, Data, Effect, Layer, Schema } from "effect";
+import { classifyScrape, type ScrapeOutcome, type ScrapeResult } from "./classify-scrape";
 import { firecrawlErrorFromStatus, ScrapeFailed } from "./errors";
 import {
   type CloudProxy,
@@ -8,15 +9,13 @@ import {
   type FirecrawlRequestFailed,
   firecrawlFrom,
   localLimiter,
-  type MapOptions,
   makeBackend,
   type PageKind,
-  type PageScrape,
   type ScrapeBackend,
-  type ScrapeRequest,
+  type ScrapedPage,
   type ScrapeUsage,
-  type SiteMap,
   sdkClient,
+  type Via,
 } from "./firecrawl";
 
 export type FirecrawlMode = "cloud" | "local" | "hybrid";
@@ -111,7 +110,9 @@ export const checkLocalFirecrawl = (localUrl: string, timeoutMs = healthTimeoutM
     ),
   );
 
-const cloudCredits = (page: PageScrape["page"]) => page.metadata?.creditsUsed ?? 1;
+// Firecrawl's billing counts enhanced and auto proxy requests as one credit, like basic
+// ones (https://docs.firecrawl.dev/billing), so only a reported count changes the default.
+const cloudCredits = (page: ScrapedPage) => page.metadata?.creditsUsed ?? 1;
 
 // Cloud errors keep their stop rules: 401, 402 and 429 stop the run.
 const cloudError = (error: FirecrawlRequestFailed): FirecrawlError =>
@@ -119,89 +120,167 @@ const cloudError = (error: FirecrawlRequestFailed): FirecrawlError =>
     ? new ScrapeFailed(error)
     : firecrawlErrorFromStatus(error.status, error.message);
 
-// A local instance has no credits or plan limits, so none of its errors stop the run: they
-// fail the one page, and the run moves on to pages that may scrape fine.
-const localError = (error: FirecrawlRequestFailed) =>
-  new ScrapeFailed({ status: error.status, message: `Local Firecrawl: ${error.message}` });
+export const needsCloudMessage = "needs cloud; credit reserve reached";
+
+// Whether a page blocked locally may go to the cloud, and what it cost when it did. The
+// credit reserve (AJM-90) hooks in here; until then only a cloud 402 refuses the page.
+export interface CloudBudget {
+  readonly allows: Effect.Effect<boolean>;
+  readonly spent: (credits: number) => Effect.Effect<void>;
+}
+
+export const unlimitedBudget: CloudBudget = {
+  allows: Effect.succeed(true),
+  spent: () => Effect.void,
+};
 
 export type RouterConfig =
   | { readonly mode: "cloud"; readonly cloud: ScrapeBackend; readonly cloudProxy: CloudProxy }
   | { readonly mode: "local"; readonly local: ScrapeBackend }
-  | { readonly mode: "hybrid"; readonly cloud: ScrapeBackend; readonly local: ScrapeBackend };
+  | {
+      readonly mode: "hybrid";
+      readonly cloud: ScrapeBackend;
+      readonly local: ScrapeBackend;
+      readonly budget?: CloudBudget;
+    };
 
-const cloudScrape = (
+// One request (a scrape or a map) that the router can send to either instance.
+interface Attempt<A> {
+  readonly kind: PageKind | "map";
+  readonly send: (
+    backend: ScrapeBackend,
+    proxy: CloudProxy | null,
+  ) => Effect.Effect<A, FirecrawlRequestFailed>;
+  // The page to classify; a map has none.
+  readonly page: (value: A) => ScrapedPage;
+  readonly cloudCredits: (value: A) => number;
+}
+
+interface Routed<A> {
+  readonly value: A;
+  readonly usage: ScrapeUsage;
+}
+
+const failureOf = (result: ScrapeResult, outcome: ScrapeOutcome, via: Via) => {
+  if ("error" in result) {
+    const { status, message } = result.error;
+    return new ScrapeFailed({
+      status,
+      message: via === "local" ? `Local Firecrawl: ${message}` : message,
+    });
+  }
+  const status = result.page.metadata?.statusCode ?? null;
+  const message =
+    outcome === "gone"
+      ? `The page is gone (HTTP ${status}).`
+      : outcome === "failed"
+        ? `The page returned HTTP ${status}.`
+        : status !== null && status >= 400
+          ? `The site blocked the ${via} scraper (HTTP ${status}).`
+          : `The site served the ${via} scraper a bot check or a page without its content.`;
+  return new ScrapeFailed({ status, message });
+};
+
+const sendCloud = <A>(
   cloud: ScrapeBackend,
-  url: string,
-  request: ScrapeRequest,
+  attempt: Attempt<A>,
   proxy: CloudProxy,
-): Effect.Effect<PageScrape, FirecrawlError> =>
-  cloud.scrape(url, { ...request, proxy }).pipe(
+): Effect.Effect<Routed<A>, FirecrawlError> =>
+  attempt.send(cloud, proxy).pipe(
     Effect.mapError(cloudError),
-    Effect.map((page) => ({ page, usage: { via: "cloud", credits: cloudCredits(page) } })),
+    Effect.map((value) => ({
+      value,
+      usage: { via: "cloud", credits: attempt.cloudCredits(value) },
+    })),
   );
 
-const localScrape = (
-  local: ScrapeBackend,
-  url: string,
-  request: ScrapeRequest,
-): Effect.Effect<PageScrape, ScrapeFailed> =>
-  local.scrape(url, request).pipe(
-    Effect.mapError(localError),
-    Effect.map((page) => ({ page, usage: { via: "local", credits: 0 } })),
+// The local result, judged by classifyScrape. A local instance has no credits or plan
+// limits, so none of its errors stop the run: they fail the one page.
+const sendLocal = <A>(local: ScrapeBackend, attempt: Attempt<A>) =>
+  attempt.send(local, null).pipe(
+    Effect.result,
+    Effect.map((sent) => {
+      const result: ScrapeResult =
+        sent._tag === "Success" ? { page: attempt.page(sent.success) } : { error: sent.failure };
+      return { sent, result, outcome: classifyScrape(result, attempt.kind) };
+    }),
   );
 
-// /map costs one credit per call.
-const cloudMap = (cloud: ScrapeBackend, url: string, options: MapOptions) =>
-  cloud.map(url, options).pipe(
-    Effect.mapError(cloudError),
-    Effect.map(({ links }): SiteMap => ({ links, usage: { via: "cloud", credits: 1 } })),
+const localOnly = <A>(local: ScrapeBackend, attempt: Attempt<A>) =>
+  sendLocal(local, attempt).pipe(
+    Effect.flatMap(({ sent, result, outcome }) =>
+      sent._tag === "Success" && outcome === "ok"
+        ? Effect.succeed({ value: sent.success, usage: { via: "local", credits: 0 } as const })
+        : Effect.fail(failureOf(result, outcome, "local")),
+    ),
   );
 
-const localMap = (local: ScrapeBackend, url: string, options: MapOptions) =>
-  local.map(url, options).pipe(
-    Effect.mapError(localError),
-    Effect.map(({ links }): SiteMap => ({ links, usage: { via: "local", credits: 0 } })),
-  );
+// Local first; only a page the site blocked is retried on the cloud, once, with the auto
+// proxy. A gone or failed page would fail there too.
+const hybrid = <A>(
+  config: Extract<RouterConfig, { mode: "hybrid" }>,
+  attempt: Attempt<A>,
+): Effect.Effect<Routed<A>, FirecrawlError> =>
+  Effect.gen(function* () {
+    const { sent, result, outcome } = yield* sendLocal(config.local, attempt);
+    if (sent._tag === "Success" && outcome === "ok") {
+      return { value: sent.success, usage: { via: "local", credits: 0 } as const };
+    }
+    if (outcome !== "blocked") return yield* failureOf(result, outcome, "local");
+    const budget = config.budget ?? unlimitedBudget;
+    if (!(yield* budget.allows)) {
+      return yield* new ScrapeFailed({ status: null, message: needsCloudMessage });
+    }
+    // Out of credits, the cloud refuses only the pages local cannot scrape, so the run goes on.
+    const cloud = yield* sendCloud(config.cloud, attempt, "auto").pipe(
+      Effect.catchIf(
+        (error) => error._tag === "FirecrawlBlocked" && error.status === 402,
+        () => Effect.fail(new ScrapeFailed({ status: 402, message: needsCloudMessage })),
+      ),
+    );
+    yield* budget.spent(cloud.usage.credits);
+    const page = { page: attempt.page(cloud.value) };
+    const cloudOutcome = classifyScrape(page, attempt.kind);
+    if (cloudOutcome !== "ok") return yield* failureOf(page, cloudOutcome, "cloud");
+    return cloud;
+  });
 
 const logUsage = (url: string, { usage }: { readonly usage: ScrapeUsage }) =>
   Effect.logDebug(`Scraped ${url} via ${usage.via} (${usage.credits} credits)`);
 
 // Implements the Firecrawl service over the instances FIRECRAWL_MODE selects.
 export const makeScrapeRouter = (config: RouterConfig) => {
-  const scrape = (
-    url: string,
-    request: ScrapeRequest,
-    _kind: PageKind,
-  ): Effect.Effect<PageScrape, FirecrawlError> => {
-    switch (config.mode) {
-      case "cloud":
-        return cloudScrape(config.cloud, url, request, config.cloudProxy);
-      case "local":
-        return localScrape(config.local, url, request);
-      case "hybrid":
-        return localScrape(config.local, url, request).pipe(
-          Effect.catch(() => cloudScrape(config.cloud, url, request, "auto")),
-        );
-    }
-  };
-
-  const map = (url: string, options: MapOptions): Effect.Effect<SiteMap, FirecrawlError> => {
-    switch (config.mode) {
-      case "cloud":
-        return cloudMap(config.cloud, url, options);
-      case "local":
-        return localMap(config.local, url, options);
-      case "hybrid":
-        return localMap(config.local, url, options).pipe(
-          Effect.catch(() => cloudMap(config.cloud, url, options)),
-        );
-    }
+  const route = <A>(url: string, attempt: Attempt<A>): Effect.Effect<Routed<A>, FirecrawlError> => {
+    const routed = (() => {
+      switch (config.mode) {
+        // Cloud runs are judged as before: only Firecrawl's own errors fail a page.
+        case "cloud":
+          return sendCloud(config.cloud, attempt, config.cloudProxy);
+        case "local":
+          return localOnly(config.local, attempt);
+        case "hybrid":
+          return hybrid(config, attempt);
+      }
+    })();
+    return routed.pipe(Effect.tap((done) => logUsage(url, done)));
   };
 
   return firecrawlFrom({
     scrape: (url, request, kind) =>
-      scrape(url, request, kind).pipe(Effect.tap((r) => logUsage(url, r))),
-    map: (url, options) => map(url, options).pipe(Effect.tap((r) => logUsage(url, r))),
+      route(url, {
+        kind,
+        send: (backend, proxy) => backend.scrape(url, proxy ? { ...request, proxy } : request),
+        page: (page) => page,
+        cloudCredits,
+      }).pipe(Effect.map(({ value, usage }) => ({ page: value, usage }))),
+    // /map costs one credit per call.
+    map: (url, options) =>
+      route(url, {
+        kind: "map",
+        send: (backend) => backend.map(url, options),
+        page: () => ({}),
+        cloudCredits: () => 1,
+      }).pipe(Effect.map(({ value, usage }) => ({ links: value.links, usage }))),
   });
 };
 
