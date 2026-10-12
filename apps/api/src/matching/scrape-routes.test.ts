@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { TestClock } from "effect/testing";
+import type { PrismaClient } from "../generated/prisma/client";
 import { FirecrawlRequestFailed, type ScrapeBackend, type ScrapedPage } from "./firecrawl";
 import { makeScrapeRouter } from "./scrape-router";
-import { memoryScrapeRouteStore, noteLocalBlock, prefersCloud } from "./scrape-routes";
+import {
+  memoryScrapeRouteStore,
+  noteLocalBlock,
+  prefersCloud,
+  prismaScrapeRouteStore,
+} from "./scrape-routes";
 
 const domain = "careers.acme.com";
 const url = `https://${domain}/jobs/1`;
@@ -45,6 +51,23 @@ describe("route policy", () => {
         yield* noteLocalBlock(store, domain);
         expect(yield* prefersCloud(store, domain)).toBe(false);
         expect(routes.get(domain)?.localBlocks).toBe(1);
+      }),
+    ));
+});
+
+describe("prismaScrapeRouteStore", () => {
+  test("carries on without routing memory when the database fails", () =>
+    runTest(
+      Effect.gen(function* () {
+        const down = () => Promise.reject(new Error("Connection refused"));
+        const scrapeRoute = { findUnique: down, upsert: down, update: down, updateMany: down };
+        const store = prismaScrapeRouteStore({ scrapeRoute } as unknown as PrismaClient);
+        expect(yield* store.get(domain)).toBeNull();
+        expect(yield* store.addLocalBlock(domain)).toBe(0);
+        yield* noteLocalBlock(store, domain);
+        expect(yield* prefersCloud(store, domain)).toBe(false);
+        yield* store.preferCloud(domain, new Date(0));
+        yield* store.localWorked(domain);
       }),
     ));
 });

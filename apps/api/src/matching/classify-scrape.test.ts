@@ -61,6 +61,31 @@ describe("classifyScrape", () => {
     expect(classifyScrape({ page: { ...page, rawHtml } }, "job")).toBe("ok");
   });
 
+  test("keeps a full job page that loads reCAPTCHA or a bot-protection script", async () => {
+    const page = await fixture("job-page");
+    const markdown = `${page.markdown}\n\n${"We hire across Europe and the US. ".repeat(40)}`;
+    const rawHtml =
+      '<html><head><script src="https://www.google.com/recaptcha/api.js"></script>' +
+      '<script src="https://js.datadome.co/tags.js"></script></head><body>' +
+      '<form><div class="g-recaptcha"></div><p>This form is protected by reCAPTCHA.</p></form>' +
+      "</body></html>";
+    expect(classifyScrape({ page: { ...page, markdown, rawHtml } }, "job")).toBe("ok");
+    const intro = "Apply below. This site is protected by reCAPTCHA and hCaptcha.";
+    expect(classifyScrape({ page: { ...page, markdown: `${intro}\n\n${markdown}` } }, "job")).toBe(
+      "ok",
+    );
+  });
+
+  test("counts a vendor captcha on a short page or under a challenge title", async () => {
+    const page = await fixture("job-page");
+    const rawHtml = '<html><body><div class="g-recaptcha"></div></body></html>';
+    // The fixture's ad is shorter than a real one, so it reads as a challenge page.
+    expect(classifyScrape({ page: { ...page, rawHtml } }, "job")).toBe("blocked");
+    const markdown = `${page.markdown}\n\n${"We hire across Europe and the US. ".repeat(40)}`;
+    const titled = { ...page, markdown, rawHtml, metadata: { title: "Security check" } };
+    expect(classifyScrape({ page: titled }, "job")).toBe("blocked");
+  });
+
   test.each<[number | null, ScrapeOutcome]>([
     // The instance gave no answer about the page, so the site is not to blame.
     [null, "unreachable"],

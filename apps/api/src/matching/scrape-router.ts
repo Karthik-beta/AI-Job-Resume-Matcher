@@ -299,6 +299,10 @@ export const makeScrapeRouter = (config: RouterConfig) => {
   });
 };
 
+// A local scrape or map that takes longer than this is given up, so hybrid mode moves on to
+// the cloud instead of waiting out the SDK's five-minute default.
+export const localTimeoutMs = 60_000;
+
 const cloudBackend = (apiKey: string) =>
   Effect.map(cloudLimiter, (limiter) => makeBackend("cloud", sdkClient({ apiKey }), limiter));
 
@@ -306,7 +310,7 @@ const cloudBackend = (apiKey: string) =>
 // keeps the SDK from sending FIRECRAWL_API_KEY to it.
 const localBackend = (apiUrl: string) =>
   Effect.map(localLimiter, (limiter) =>
-    makeBackend("local", sdkClient({ apiKey: "", apiUrl }), limiter),
+    makeBackend("local", sdkClient({ apiKey: "", apiUrl, timeoutMs: localTimeoutMs }), limiter),
   );
 
 // Firecrawl routed per FIRECRAWL_MODE, with the local instance's health check.

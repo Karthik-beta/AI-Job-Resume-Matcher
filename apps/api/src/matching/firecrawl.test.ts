@@ -330,6 +330,23 @@ describe("SDK client", () => {
     }
   });
 
+  test("caps each scrape at the given timeout without auto-resume", async () => {
+    const scrape = spyOn(FirecrawlClient.prototype, "scrape").mockResolvedValue({
+      markdown: "# Jobs",
+    } as never);
+    try {
+      await sdkClient({ apiKey: "", apiUrl: "http://localhost:3002", timeoutMs: 60_000 })
+        .scrape("https://acme.com/careers", { formats: ["markdown"] })
+        .pipe(Effect.runPromise);
+      expect(scrape).toHaveBeenCalledWith(
+        "https://acme.com/careers",
+        expect.objectContaining({ timeout: 60_000, autoResume: false }),
+      );
+    } finally {
+      scrape.mockRestore();
+    }
+  });
+
   test("passes the map search and limit to the SDK", async () => {
     const map = spyOn(FirecrawlClient.prototype, "map").mockResolvedValue({
       links: [{ url: "https://acme.com/jobs/1", title: "Engineer" }],
