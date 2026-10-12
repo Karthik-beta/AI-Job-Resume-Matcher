@@ -6,6 +6,7 @@ import {
   HttpFetch,
   httpFetchLayer,
   makeHttpFetch,
+  maxDownloadBytes,
 } from "./download";
 
 describe("directDownloadUrl", () => {
@@ -74,5 +75,41 @@ describe("http fetch", () => {
     expect(await Effect.runPromise(Effect.flip(odd.request("https://example.com")))).toMatchObject({
       message: "boom",
     });
+  });
+
+  test("rejects a body over 20 MB by its declared length", async () => {
+    let cancelled = false;
+    const body = new ReadableStream({
+      cancel: () => {
+        cancelled = true;
+      },
+    });
+    const http = makeHttpFetch(() =>
+      Promise.resolve(
+        new Response(body, { headers: { "content-length": String(maxDownloadBytes + 1) } }),
+      ),
+    );
+    const error = await Effect.runPromise(Effect.flip(http.request("https://example.com/cv")));
+    expect(error).toMatchObject({
+      _tag: "ScrapeFailed",
+      message: "The file is larger than 20 MB.",
+    });
+    expect(cancelled).toBe(true);
+  });
+
+  test("rejects a body over 20 MB without a declared length", async () => {
+    const stream = (size: number) =>
+      new ReadableStream({
+        start: (controller) => {
+          controller.enqueue(new Uint8Array(size));
+          controller.close();
+        },
+      });
+    const http = makeHttpFetch(() => Promise.resolve(new Response(stream(maxDownloadBytes + 1))));
+    const error = await Effect.runPromise(Effect.flip(http.request("https://example.com/cv")));
+    expect(error).toMatchObject({ message: "The file is larger than 20 MB." });
+    const ok = makeHttpFetch(() => Promise.resolve(new Response(stream(maxDownloadBytes))));
+    const response = await Effect.runPromise(ok.request("https://example.com/cv"));
+    expect(response.body.byteLength).toBe(maxDownloadBytes);
   });
 });

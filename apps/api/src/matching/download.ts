@@ -3,6 +3,10 @@ import { ScrapeFailed } from "./errors";
 
 const getTimeoutMs = 30_000;
 const headTimeoutMs = 10_000;
+// A resume or job ad is far smaller; anything bigger is not worth holding in memory.
+export const maxDownloadBytes = 20 * 1024 * 1024;
+
+const tooLarge = () => new Error("The file is larger than 20 MB.");
 
 export interface Download {
   readonly status: number;
@@ -37,7 +41,13 @@ export const makeHttpFetch = (fetch: (url: string, init: RequestInit) => Promise
             redirect: "follow",
             signal: AbortSignal.any([signal, timeout]),
           });
+          const length = Number(response.headers.get("content-length"));
+          if (method === "GET" && length > maxDownloadBytes) {
+            await response.body?.cancel();
+            throw tooLarge();
+          }
           const body = new Uint8Array(await response.arrayBuffer());
+          if (body.byteLength > maxDownloadBytes) throw tooLarge();
           return { status: response.status, headers: response.headers, body };
         },
         catch: (cause) =>
