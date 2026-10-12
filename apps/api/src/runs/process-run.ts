@@ -15,7 +15,8 @@ import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
 import type { HostLimiter } from "../matching/sources/http";
-import { requirementsOf } from "./run-settings";
+import { acceptsTitle } from "../matching/title-filters";
+import { requirementsOf, titleFiltersOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
 export type RunServices =
@@ -82,6 +83,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       return yield* finish("STOPPED", "Add a resume URL in settings before starting a run");
     }
     const requirements = requirementsOf(settings);
+    const titleFilters = titleFiltersOf(settings);
     const sources = yield* query(() =>
       prisma.jobSource.findMany({ where: { userId, id: { in: run.sourceIds } } }),
     );
@@ -129,13 +131,16 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
     const { resume, listings, kindByUrl } = prepared.success;
 
-    const eligible = listings.filter((listing) => acceptsJob(requirements, listing));
+    const eligible = listings.filter(
+      (listing) => acceptsJob(requirements, listing) && acceptsTitle(titleFilters, listing.title),
+    );
     // The run was created before the resume content was known, so its key is replaced here.
     const contextKey = contextKeyOf({
       resumeHash: resume.hash,
       sourceIds: run.sourceIds,
       model,
       requirements,
+      titleFilters,
     });
     yield* query(() =>
       prisma.run.update({

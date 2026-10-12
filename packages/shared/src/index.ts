@@ -111,6 +111,23 @@ export type MatchesQuery = typeof MatchesQuery.Type;
 export const UpdateMatch = Schema.Struct({ status: MatchStatus });
 export type UpdateMatch = typeof UpdateMatch.Type;
 
+export const maxTitleKeywords = 30;
+export const maxTitleKeywordLength = 60;
+
+// Words or phrases matched as whole words against job titles.
+const TitleKeywords = Schema.Array(
+  Schema.Trim.check(
+    Schema.makeFilter((keyword) => keyword !== "", { message: "Remove the empty keyword" }),
+    Schema.makeFilter((keyword) => keyword.length <= maxTitleKeywordLength, {
+      message: `Use at most ${maxTitleKeywordLength} characters per keyword`,
+    }),
+  ),
+).check(
+  Schema.makeFilter((keywords) => keywords.length <= maxTitleKeywords, {
+    message: `Use at most ${maxTitleKeywords} keywords`,
+  }),
+);
+
 export const UpdateSettings = Schema.Struct({
   resumeUrl: Schema.NullOr(HttpUrl),
   discordWebhookUrl: Schema.NullOr(DiscordWebhookUrl),
@@ -122,6 +139,9 @@ export const UpdateSettings = Schema.Struct({
   targetMaxYears: Schema.NullOr(NonNegative),
   locations: Schema.Array(Schema.String),
   includeUnknown: Schema.Boolean,
+  // A title must match one of titleInclude (when there are any) and none of titleExclude.
+  titleInclude: TitleKeywords,
+  titleExclude: TitleKeywords,
   maxJobsPerRun: Schema.Int.check(
     Schema.isBetween(
       { minimum: 1, maximum: 20 },
@@ -151,6 +171,8 @@ export const defaultSettings: UpdateSettings = {
   targetMaxYears: null,
   locations: [],
   includeUnknown: true,
+  titleInclude: [],
+  titleExclude: [],
   maxJobsPerRun: 5,
   scheduleMinutes: null,
 };

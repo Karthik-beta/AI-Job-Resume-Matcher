@@ -37,11 +37,32 @@ describe("settings", () => {
       targetMinYears: 2,
       targetMaxYears: 5,
       locations: ["Bengaluru", "Remote"],
+      titleInclude: ["backend", "site reliability"],
+      titleExclude: ["senior"],
       scheduleMinutes: 60,
     };
     await user.put("/api/settings").send(settings).expect(200);
     const response = await user.get("/api/settings").expect(200);
     expect(response.body).toEqual(settings);
+  });
+
+  it("trims title keywords", async () => {
+    const saved = await user
+      .put("/api/settings")
+      .send({ ...defaultSettings, titleInclude: [" go "], titleExclude: ["intern "] })
+      .expect(200);
+    expect(saved.body).toMatchObject({ titleInclude: ["go"], titleExclude: ["intern"] });
+  });
+
+  it.each([
+    { titleInclude: [" "] },
+    { titleExclude: ["x".repeat(61)] },
+    { titleInclude: Array.from({ length: 31 }, (_, index) => `k${index}`) },
+  ])("rejects invalid title keywords: %#", async (keywords) => {
+    await user
+      .put("/api/settings")
+      .send({ ...defaultSettings, ...keywords })
+      .expect(400);
   });
 
   it("rejects 12 months of experience", async () => {

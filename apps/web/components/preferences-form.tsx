@@ -24,6 +24,14 @@ function optionalNumber(data: FormData, name: string) {
   return value === "" ? null : Number(value);
 }
 
+// "Bengaluru, Remote" as ["Bengaluru", "Remote"].
+function list(data: FormData, name: string) {
+  return text(data, name)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+}
+
 function toInput(data: FormData, includeUnknown: boolean) {
   return {
     resumeUrl: optionalText(data, "resumeUrl"),
@@ -32,11 +40,10 @@ function toInput(data: FormData, includeUnknown: boolean) {
     experienceMonths: Number(text(data, "experienceMonths")),
     targetMinYears: optionalNumber(data, "targetMinYears"),
     targetMaxYears: optionalNumber(data, "targetMaxYears"),
-    locations: text(data, "locations")
-      .split(",")
-      .map((city) => city.trim())
-      .filter((city) => city !== ""),
+    locations: list(data, "locations"),
     includeUnknown,
+    titleInclude: list(data, "titleInclude"),
+    titleExclude: list(data, "titleExclude"),
     maxJobsPerRun: Number(text(data, "maxJobsPerRun")),
     scheduleMinutes: optionalNumber(data, "scheduleMinutes"),
   };
@@ -199,6 +206,28 @@ function Form({
             placeholder="Bengaluru, Remote"
           />,
           "Separate cities with commas.",
+        )}
+        {field(
+          "titleInclude",
+          "Job titles must include",
+          <Input
+            id="titleInclude"
+            name="titleInclude"
+            defaultValue={settings.titleInclude.join(", ")}
+            placeholder="Backend, Full stack"
+          />,
+          "Any of these words or phrases, separated by commas. Leave empty to allow any title.",
+        )}
+        {field(
+          "titleExclude",
+          "Job titles must not include",
+          <Input
+            id="titleExclude"
+            name="titleExclude"
+            defaultValue={settings.titleExclude.join(", ")}
+            placeholder="Senior, Intern"
+          />,
+          "None of these words or phrases, separated by commas.",
         )}
         <Field orientation="horizontal">
           <Switch

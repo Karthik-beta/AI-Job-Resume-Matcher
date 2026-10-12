@@ -21,7 +21,12 @@ export class SettingsService {
   }
 
   async update(userId: string, settings: UpdateSettings): Promise<UpdateSettings> {
-    const data = { ...settings, locations: [...settings.locations] };
+    const data = {
+      ...settings,
+      locations: [...settings.locations],
+      titleInclude: [...settings.titleInclude],
+      titleExclude: [...settings.titleExclude],
+    };
     const { userId: _, ...saved } = await this.prisma.settings.upsert({
       where: { userId },
       create: { userId, ...data },

@@ -406,6 +406,30 @@ describe("process run", () => {
     expect(repeat.run).toMatchObject({ status: "COMPLETED", checked: 0 });
   });
 
+  it("keeps only titles that pass the keyword filters", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.settings.update({
+      where: { userId },
+      data: { titleInclude: ["job"], titleExclude: ["3", "Job 4"] },
+    });
+    try {
+      const { run, evaluated } = await runWith(await startRun(), {});
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("5")]);
+      expect(run).toMatchObject({ status: "COMPLETED", eligible: 2, checked: 2 });
+
+      // The filters are part of the context, so changing them analyses jobs again.
+      await prisma.settings.update({ where: { userId }, data: { titleExclude: ["3"] } });
+      const changed = await runWith(await startRun(), {});
+      expect(changed.evaluated).toEqual([jobUrl("1"), jobUrl("4"), jobUrl("5")]);
+      expect(changed.run.contextKey).not.toBe(run.contextKey);
+    } finally {
+      await prisma.settings.update({
+        where: { userId },
+        data: { titleInclude: [], titleExclude: [] },
+      });
+    }
+  });
+
   it("ignores a run that is no longer queued", async () => {
     const runId = await startRun();
     await prisma.run.update({ where: { id: runId }, data: { status: "STOPPED" } });
