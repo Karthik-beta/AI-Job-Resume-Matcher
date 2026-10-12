@@ -81,12 +81,22 @@ const fakeFirecrawl = (
         scraped.push(url);
         return fail
           ? Effect.fail(new ScrapeFailed({ status: 500, message: "Server error" }))
-          : Effect.succeed({ markdown: markdown ?? `Markdown ${scraped.length}`, rawHtml });
+          : Effect.succeed({
+              markdown: markdown ?? `Markdown ${scraped.length}`,
+              rawHtml,
+              usage: { via: "cloud", credits: 1 } as const,
+            });
       }),
     scrapeListingPage: (url) =>
       Effect.sync(() => {
         scraped.push(url);
-        return { markdown: listingMarkdown, links: [], rawHtml: null, siteName: "Example" };
+        return {
+          markdown: listingMarkdown,
+          links: [],
+          rawHtml: null,
+          siteName: "Example",
+          usage: { via: "cloud", credits: 1 } as const,
+        };
       }),
     map: () => Effect.die("unused"),
   });

@@ -1,0 +1,7 @@
+{
+  "markdown": "# Access Denied\n\nYou don't have permission to access \"http://careers.example.com/jobs/123\" on this server.\n\nReference #18.4f2d1102.1728720000.1a2b3c4d",
+  "metadata": {
+    "title": "Access Denied",
+    "statusCode": 403
+  }
+}

@@ -58,9 +58,10 @@ export const resumeSourceLayer = Layer.effect(
     const pdf = yield* PdfParser;
 
     const scrape = (url: string) =>
-      firecrawl
-        .scrapeMarkdown(url)
-        .pipe(Effect.flatMap(pdfOrMarkdown), Effect.provideService(PdfParser, pdf));
+      firecrawl.scrapeMarkdown(url).pipe(
+        Effect.flatMap(({ markdown }) => pdfOrMarkdown(markdown)),
+        Effect.provideService(PdfParser, pdf),
+      );
 
     return ResumeSource.of({
       resolve: (userId, url) =>

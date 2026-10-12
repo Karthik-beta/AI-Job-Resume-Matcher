@@ -157,6 +157,15 @@ model PageCache {
   @@id([userId, url, kind])
 }
 
+// Sites that block the local Firecrawl, so hybrid runs send them straight to the cloud.
+// Shared by every user, like the sites themselves.
+model ScrapeRoute {
+  domain           String    @id
+  localBlocks      Int       @default(0) // consecutive local blocks; a local success resets it
+  preferCloudUntil DateTime?
+  updatedAt        DateTime  @updatedAt
+}
+
 model User {
   id            String    @id
   name          String

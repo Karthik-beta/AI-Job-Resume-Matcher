@@ -2,6 +2,7 @@ import { Injectable, type OnApplicationShutdown, type OnModuleInit } from "@nest
 import { type Effect, Layer, ManagedRuntime } from "effect";
 import { config } from "../config";
 import { pageCacheStoreLayer } from "../matching/page-cache";
+import { scrapeRouteStoreLayer } from "../matching/scrape-routes";
 import { PrismaService } from "../prisma/prisma.service";
 import { fakeProvidersLayer } from "../providers/fake";
 import { liveProvidersLayer } from "../providers/live";
@@ -16,7 +17,9 @@ export class EffectRuntime implements OnModuleInit, OnApplicationShutdown {
       (config.PROVIDERS === "fake"
         ? fakeProvidersLayer
         : liveProvidersLayer(config.OPENROUTER_MODEL)
-      ).pipe(Layer.provideMerge(pageCacheStoreLayer(prisma))),
+      ).pipe(
+        Layer.provideMerge(Layer.merge(pageCacheStoreLayer(prisma), scrapeRouteStoreLayer(prisma))),
+      ),
     );
   }
 

@@ -76,7 +76,9 @@ const setup = (
               Effect.suspend(() => {
                 scraped.push(url);
                 const next = pages.shift() ?? `# Resume page ${scraped.length}`;
-                return typeof next === "string" ? Effect.succeed(next) : Effect.fail(next);
+                return typeof next === "string"
+                  ? Effect.succeed({ markdown: next, usage: { via: "cloud", credits: 1 } as const })
+                  : Effect.fail(next);
               }),
             scrapeJob: () => Effect.die("unused"),
             scrapeListingPage: () => Effect.die("unused"),

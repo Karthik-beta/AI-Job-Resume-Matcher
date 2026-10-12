@@ -14,6 +14,7 @@ import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matchi
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
+import { ScrapeHealth } from "../matching/scrape-router";
 import type { HostLimiter } from "../matching/sources/http";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
@@ -28,6 +29,7 @@ export type RunServices =
   | ListingExtractor
   | PdfParser
   | ResumeSource
+  | ScrapeHealth
   | MatchEvaluator
   | TitleTriage
   | Notifier;
@@ -103,9 +105,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     const evaluator = yield* MatchEvaluator;
     const notifier = yield* Notifier;
     const resumeSource = yield* ResumeSource;
+    const scrapeHealth = yield* ScrapeHealth;
 
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
+      yield* scrapeHealth.check;
       const resume = yield* resumeSource.resolve(userId, resumeUrl);
       const listings: Listing[] = [];
       // As in dedupeListings, the first source to list a job page decides how its ad is read.

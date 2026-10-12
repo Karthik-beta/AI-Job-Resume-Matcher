@@ -55,12 +55,19 @@ const fetchPage = async (
       Effect.sync(() => {
         scrapes.push({ url, selector, withHtml });
         const served = options.pages?.[url] ?? page;
-        return { markdown: "", links: [], rawHtml: null, siteName: null, ...served };
+        return {
+          markdown: "",
+          links: [],
+          rawHtml: null,
+          siteName: null,
+          usage: { via: "cloud", credits: 1 } as const,
+          ...served,
+        };
       }),
     map: (url, { search }) =>
       Effect.sync(() => {
         maps.push(`${url} ${search}`);
-        return options.mapped ?? [];
+        return { links: options.mapped ?? [], usage: { via: "cloud", credits: 1 } as const };
       }),
   });
   const extractor = ListingExtractor.of({

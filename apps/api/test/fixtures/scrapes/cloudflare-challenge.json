@@ -1,0 +1,8 @@
+{
+  "markdown": "# careers.example.com\n\n## Verifying you are human. This may take a few seconds.\n\ncareers.example.com needs to review the security of your connection before proceeding.\n\nRay ID: 8f1c2a3b4d5e6f70\n\nPerformance & security by Cloudflare",
+  "rawHtml": "<!DOCTYPE html><html lang=\"en-US\"><head><title>Just a moment...</title><meta http-equiv=\"refresh\" content=\"390\"></head><body><div class=\"main-wrapper\"><noscript><div>Enable JavaScript and cookies to continue</div></noscript></div><script>(function(){window._cf_chl_opt={cvId: '3',cZone: 'careers.example.com',cType: 'managed'};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=8f1c2a3b4d5e6f70';document.getElementsByTagName('head')[0].appendChild(a);}());</script></body></html>",
+  "metadata": {
+    "title": "Just a moment...",
+    "statusCode": 200
+  }
+}

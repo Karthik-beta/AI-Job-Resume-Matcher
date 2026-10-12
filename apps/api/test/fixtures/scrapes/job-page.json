@@ -1,0 +1,7 @@
+{
+  "markdown": "# Senior Backend Engineer\n\nBengaluru, India \u00b7 Full time \u00b7 Engineering\n\n## About the role\n\nWe are looking for a backend engineer to design and run the APIs behind our payments platform. You will own services end to end, from design reviews to on-call, and work with product and finance teams on reconciliation and reporting.\n\n## What you will do\n\n- Build and operate TypeScript services on PostgreSQL and Kafka\n- Improve the reliability and latency of payment flows\n- Mentor engineers and review designs\n\n## Requirements\n\n- 5+ years building backend systems\n- Experience with distributed systems and relational databases",
+  "metadata": {
+    "title": "Senior Backend Engineer | Example",
+    "statusCode": 200
+  }
+}
