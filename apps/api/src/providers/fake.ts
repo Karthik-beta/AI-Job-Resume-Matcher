@@ -1,6 +1,7 @@
 import { isDiscordWebhookUrl } from "@job-matcher/shared";
 import { Effect, Layer, Schema } from "effect";
 import { Notifier } from "../matching/discord";
+import { HttpFetch } from "../matching/download";
 import {
   FirecrawlBlocked,
   MatchOutputInvalid,
@@ -10,6 +11,8 @@ import {
 } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import { Firecrawl, Listing } from "../matching/firecrawl";
+import { PdfParser } from "../matching/pdf";
+import { ResumeSource, sha256 } from "../matching/resume-source";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -53,6 +56,25 @@ export const fakeFirecrawl = Firecrawl.of({
     ),
 });
 
+// Every resume URL serves the fixture resume, hashed like a scraped page.
+export const fakeResumeSource = ResumeSource.of({
+  resolve: (_userId, url) =>
+    scriptedError(url).pipe(
+      Effect.andThen(readFixture("resume.md")),
+      Effect.map((text) => ({ text, hash: sha256(text) })),
+    ),
+});
+
+// No HTTP in fake mode: job pages fall back to the Firecrawl fixtures.
+export const fakeHttpFetch = HttpFetch.of({
+  request: (url) =>
+    Effect.fail(new ScrapeFailed({ status: null, message: `No fake HTTP for ${url}.` })),
+});
+
+export const fakePdfParser = PdfParser.of({
+  parse: () => Effect.fail(new ScrapeFailed({ status: null, message: "No fake PDF parser." })),
+});
+
 // A job page's "Verdict:" line decides the outcome, so fixtures can script each case.
 export const fakeEvaluator = MatchEvaluator.of({
   preflight: Effect.void,
@@ -83,6 +105,9 @@ export const fakeNotifier = Notifier.of({
 
 export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(Firecrawl, fakeFirecrawl),
+  Layer.succeed(ResumeSource, fakeResumeSource),
+  Layer.succeed(HttpFetch, fakeHttpFetch),
+  Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
   Layer.succeed(Notifier, fakeNotifier),
 );

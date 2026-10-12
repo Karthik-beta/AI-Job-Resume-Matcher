@@ -14,6 +14,7 @@
   "dependencies": {
     "@effect/ai-openrouter": "4.0.2",
     "@job-matcher/shared": "workspace:*",
+    "@llamaindex/liteparse": "2.15.1",
     "@mendable/firecrawl-js": "^4.46.0",
     "@nestjs/bullmq": "^12.0.0",
     "@nestjs/common": "^12.1.2",

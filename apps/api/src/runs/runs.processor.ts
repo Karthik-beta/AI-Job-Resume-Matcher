@@ -33,7 +33,9 @@ export class RunsProcessor extends WorkerHost implements OnApplicationBootstrap 
 
   async process(job: Job<RunJob | ScheduledJob>) {
     if ("runId" in job.data) {
-      return this.effect.runPromise(processRun(this.prisma, job.data.runId));
+      return this.effect.runPromise(
+        processRun(this.prisma, job.data.runId, config.OPENROUTER_MODEL),
+      );
     }
     const { userId } = job.data;
     const settings = await this.prisma.settings.findUnique({ where: { userId } });

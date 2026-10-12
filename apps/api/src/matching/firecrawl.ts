@@ -205,7 +205,8 @@ export const firecrawlLayer = (apiKey: string) => {
     Firecrawl,
     makeFirecrawl((url, format) =>
       Effect.tryPromise({
-        try: () => client.scrape(url, { formats: [format] }),
+        // A PDF comes back as base64 for one credit instead of one per page (see pdfOrMarkdown).
+        try: () => client.scrape(url, { formats: [format], parsers: [] }),
         catch: (cause) => cause,
       }),
     ),

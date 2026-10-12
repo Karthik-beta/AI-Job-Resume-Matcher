@@ -3,7 +3,7 @@ import { contextKey, type MatchContext } from "./context-key";
 import { defaultRequirements } from "./requirements";
 
 const context: MatchContext = {
-  resumeUrl: "https://example.com/resume.pdf",
+  resumeHash: "a".repeat(64),
   sourceIds: ["b", "a", "c"],
   model: "openai/gpt-4o-mini",
   requirements: { ...defaultRequirements, experienceYears: 3, locations: ["Bengaluru", "Pune"] },
@@ -24,7 +24,7 @@ describe("contextKey", () => {
   });
 
   test.each<Partial<MatchContext>>([
-    { resumeUrl: "https://example.com/other.pdf" },
+    { resumeHash: "b".repeat(64) },
     { sourceIds: ["a", "b"] },
     { model: "anthropic/claude-sonnet" },
     { requirements: { ...context.requirements, includeUnknown: false } },

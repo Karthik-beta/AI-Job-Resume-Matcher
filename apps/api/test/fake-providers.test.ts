@@ -2,7 +2,14 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PrismaService } from "../src/prisma/prisma.service";
-import { fakeEvaluator, fakeNotifier, fakeProvidersLayer } from "../src/providers/fake";
+import {
+  fakeEvaluator,
+  fakeHttpFetch,
+  fakeNotifier,
+  fakePdfParser,
+  fakeProvidersLayer,
+  fakeResumeSource,
+} from "../src/providers/fake";
 import { liveProvidersLayer } from "../src/providers/live";
 import { processRun } from "../src/runs/process-run";
 
@@ -16,7 +23,7 @@ describe("fake providers", () => {
     const run = await prisma.run.create({
       data: { userId, trigger: "MANUAL", contextKey: sourceUrl, sourceIds: [source.id] },
     });
-    await Effect.runPromise(processRun(prisma, run.id).pipe(Effect.provide(layer)));
+    await Effect.runPromise(processRun(prisma, run.id, "test/model").pipe(Effect.provide(layer)));
     return prisma.run.findUniqueOrThrow({ where: { id: run.id }, include: { results: true } });
   };
 
@@ -57,6 +64,21 @@ describe("fake providers", () => {
       "Tests must not call",
     );
     expect(() => liveProvidersLayer("example/model")).toThrow();
+  });
+
+  it("serves the fixture resume and makes no HTTP requests or PDF parses", async () => {
+    const resume = await Effect.runPromise(
+      fakeResumeSource.resolve(userId, "https://example.com/cv.pdf"),
+    );
+    expect(resume.text).toContain("Asha Rao");
+    expect(resume.hash).toMatch(/^[0-9a-f]{64}$/);
+    const outcomes = await Effect.runPromise(
+      Effect.all([
+        Effect.flip(fakeHttpFetch.request("https://example.com/cv.pdf")),
+        Effect.flip(fakePdfParser.parse(new Uint8Array())),
+      ]),
+    );
+    expect(outcomes.map(({ _tag }) => _tag)).toEqual(["ScrapeFailed", "ScrapeFailed"]);
   });
 
   it("fakes Discord with the same URL check as the live notifier", async () => {

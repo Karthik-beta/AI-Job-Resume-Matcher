@@ -13,12 +13,10 @@ export class EffectRuntime implements OnModuleInit, OnApplicationShutdown {
 
   constructor(prisma: PrismaService) {
     this.runtime = ManagedRuntime.make(
-      Layer.merge(
-        pageCacheStoreLayer(prisma),
-        config.PROVIDERS === "fake"
-          ? fakeProvidersLayer
-          : liveProvidersLayer(config.OPENROUTER_MODEL),
-      ),
+      (config.PROVIDERS === "fake"
+        ? fakeProvidersLayer
+        : liveProvidersLayer(config.OPENROUTER_MODEL)
+      ).pipe(Layer.provideMerge(pageCacheStoreLayer(prisma))),
     );
   }
 

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { Notifier } from "../src/matching/discord";
+import { HttpFetch } from "../src/matching/download";
 import {
   MatchOutputInvalid,
   ModelUnsupported,
@@ -10,7 +11,10 @@ import {
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
+import { PdfParser } from "../src/matching/pdf";
+import { ResumeSource } from "../src/matching/resume-source";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
 
 const listing = (url: string, locations: string[] = [], title = `Job ${url}`): Listing => ({
@@ -50,9 +54,11 @@ describe("process run", () => {
       verdicts?: Record<string, Verdict>;
       preflight?: Effect.Effect<void, ModelUnsupported>;
       failAlerts?: boolean;
+      resumeHash?: string;
     },
   ) => {
     const evaluated: string[] = [];
+    const resumeHashes = new Set<string | undefined>();
     const scraped: string[] = [];
     const alerts: { webhookUrl: string; jobUrl: string }[] = [];
     const notifier = Notifier.of({
@@ -75,8 +81,9 @@ describe("process run", () => {
           return listings[url] ?? [];
         }),
     });
-    const evaluate = ({ jobPage }: MatchInput) => {
+    const evaluate = ({ jobPage, resumeHash }: MatchInput) => {
       const url = jobPage.replace("Page ", "");
+      resumeHashes.add(resumeHash);
       evaluated.push(url);
       switch (options.verdicts?.[url] ?? "no match") {
         case "match":
@@ -97,10 +104,18 @@ describe("process run", () => {
       ),
       pageCacheStoreLayer(prisma),
       Layer.succeed(Notifier, notifier),
+      Layer.succeed(
+        ResumeSource,
+        ResumeSource.of({
+          resolve: () => Effect.succeed({ text: "Resume", hash: options.resumeHash ?? "resume-1" }),
+        }),
+      ),
+      Layer.succeed(HttpFetch, fakeHttpFetch),
+      Layer.succeed(PdfParser, fakePdfParser),
     );
-    await Effect.runPromise(processRun(prisma, runId).pipe(Effect.provide(layer)));
+    await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
-    return { run, evaluated, scraped, alerts };
+    return { run, evaluated, scraped, alerts, resumeHashes };
   };
 
   const jobUrl = (id: string) => `https://jobs.example.com/${id}`;
@@ -246,6 +261,28 @@ describe("process run", () => {
     } finally {
       await prisma.settings.update({ where: { userId }, data: { discordWebhookUrl: null } });
     }
+  });
+
+  it("analyses jobs again when the file at the resume URL changes", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const first = await runWith(await startRun(), {});
+    expect(first.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    expect(first.run.contextKey).not.toBe(contextKey);
+    expect(first.resumeHashes).toEqual(new Set(["resume-1"]));
+
+    const changed = await runWith(await startRun(), { resumeHash: "resume-2" });
+    expect(changed.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    expect(changed.run.contextKey).not.toBe(first.run.contextKey);
+    expect(changed.resumeHashes).toEqual(new Set(["resume-2"]));
+    const keys = await prisma.jobResult.findMany({
+      where: { runId: changed.run.id },
+      select: { contextKey: true },
+    });
+    expect(keys.map((row) => row.contextKey)).toEqual(Array(3).fill(changed.run.contextKey));
+
+    const unchanged = await runWith(await startRun(), { resumeHash: "resume-2" });
+    expect(unchanged.evaluated).toEqual([jobUrl("5")]);
+    expect(unchanged.run.contextKey).toBe(changed.run.contextKey);
   });
 
   it("ignores a run that is no longer queued", async () => {
