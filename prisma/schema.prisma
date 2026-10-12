@@ -51,7 +51,7 @@ model Run {
   userId     String
   trigger    RunTrigger
   status     RunStatus   @default(QUEUED)
-  contextKey String // hash of resume URL + source ids + model + requirements
+  contextKey String // hash of resume content + source ids + model + requirements
   sourceIds  String[]
   found      Int         @default(0)
   eligible   Int         @default(0)

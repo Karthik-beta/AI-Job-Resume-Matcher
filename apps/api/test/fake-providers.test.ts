@@ -23,7 +23,7 @@ describe("fake providers", () => {
     const run = await prisma.run.create({
       data: { userId, trigger: "MANUAL", contextKey: sourceUrl, sourceIds: [source.id] },
     });
-    await Effect.runPromise(processRun(prisma, run.id).pipe(Effect.provide(layer)));
+    await Effect.runPromise(processRun(prisma, run.id, "test/model").pipe(Effect.provide(layer)));
     return prisma.run.findUniqueOrThrow({ where: { id: run.id }, include: { results: true } });
   };
 

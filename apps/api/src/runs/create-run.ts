@@ -39,8 +39,9 @@ export const createRun = (
         userId,
         trigger,
         sourceIds: ids,
+        // Provisional: the worker replaces it once it has the resume content hash.
         contextKey: contextKey({
-          resumeUrl: settings.resumeUrl,
+          resumeHash: settings.resumeUrl,
           sourceIds: ids,
           model,
           requirements: requirementsOf(settings),
