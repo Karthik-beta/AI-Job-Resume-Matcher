@@ -1,6 +1,8 @@
 import { Clock, Context, Duration, Effect, Layer, Option, Schema } from "effect";
 import type { CacheKind, Prisma, PrismaClient } from "../generated/prisma/client";
+import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
+import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
 
 const listingsTtl = Duration.minutes(15);
 
@@ -75,16 +77,33 @@ const cached = <A extends Prisma.InputJsonValue, E, R>(
 const decodeMarkdown = Schema.decodeUnknownOption(Schema.String);
 const decodeListings = Schema.decodeUnknownOption(Schema.Array(Listing));
 
-export const scrapeJobPage = (userId: string, url: string) =>
+// A PDF job ad is parsed here, as Firecrawl bills a PDF per page. A failed HEAD or download,
+// or a body that is not a PDF after all, falls back to Firecrawl.
+const downloadPdf = (url: string) =>
   Effect.gen(function* () {
-    const firecrawl = yield* Firecrawl;
-    return yield* cached(
-      { userId, url, kind: "JOB_PAGE" },
-      decodeMarkdown,
-      null,
-      firecrawl.scrapeMarkdown(url),
-    );
+    const http = yield* HttpFetch;
+    const isPdfPath = URL.canParse(url) && new URL(url).pathname.toLowerCase().endsWith(".pdf");
+    if (!isPdfPath) {
+      const head = yield* http.request(url, { method: "HEAD" }).pipe(Effect.option);
+      const type = Option.getOrNull(head)?.headers.get("content-type") ?? "";
+      if (!type.toLowerCase().startsWith("application/pdf")) return null;
+    }
+    const response = yield* http.request(url).pipe(Effect.option);
+    if (Option.isNone(response)) return null;
+    const { status, body } = response.value;
+    return isSuccess(status) && isPdf(body) ? body : null;
   });
+
+const fetchJobPage = (url: string) =>
+  Effect.gen(function* () {
+    const pdf = yield* downloadPdf(url);
+    if (pdf) return yield* (yield* PdfParser).parse(pdf);
+    const firecrawl = yield* Firecrawl;
+    return yield* firecrawl.scrapeMarkdown(url).pipe(Effect.flatMap(pdfOrMarkdown));
+  });
+
+export const scrapeJobPage = (userId: string, url: string) =>
+  cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, fetchJobPage(url));
 
 export const scrapeSourceListings = (userId: string, url: string) =>
   Effect.gen(function* () {
