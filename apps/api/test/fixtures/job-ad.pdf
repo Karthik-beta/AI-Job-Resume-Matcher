@@ -1,0 +1,52 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+6 0 obj
+<< /Length 833 >>
+stream
+BT /F2 20 Tf 72 740 Td (Senior Backend Engineer) Tj ET
+BT /F1 12 Tf 72 712 Td (Acme Analytics - Remote \(EU time zones\)) Tj ET
+BT /F2 14 Tf 72 686 Td (About the role) Tj ET
+BT /F1 11 Tf 72 666 Td (We are hiring a backend engineer to build our TypeScript data platform.) Tj ET
+BT /F1 11 Tf 72 650 Td (You will design APIs, own Postgres schemas and run services on Kubernetes.) Tj ET
+BT /F2 14 Tf 72 624 Td (Requirements) Tj ET
+BT /F1 11 Tf 72 604 Td (- 5+ years of TypeScript or Node.js experience) Tj ET
+BT /F1 11 Tf 72 588 Td (- Strong PostgreSQL and Redis skills) Tj ET
+BT /F1 11 Tf 72 572 Td (- Experience with Docker and CI/CD pipelines) Tj ET
+BT /F2 14 Tf 72 546 Td (Nice to have) Tj ET
+BT /F1 11 Tf 72 526 Td (- Bun, Effect or functional programming) Tj ET
+BT /F1 11 Tf 72 510 Td (- Salary: EUR 80,000 - 95,000 per year) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Title (Senior Backend Engineer) /Producer (liteparse-spike make-pdfs.ts) >>
+endobj
+xref
+0 8
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000257 00000 n 
+0000000354 00000 n 
+0000000456 00000 n 
+0000001340 00000 n 
+trailer
+<< /Size 8 /Root 1 0 R /Info 7 0 R >>
+startxref
+1435
+%%EOF

@@ -75,21 +75,16 @@ const cached = <A extends Prisma.InputJsonValue, E, R>(
 const decodeMarkdown = Schema.decodeUnknownOption(Schema.String);
 const decodeListings = Schema.decodeUnknownOption(Schema.Array(Listing));
 
-const cachedMarkdown = (userId: string, url: string, kind: "RESUME" | "JOB_PAGE") =>
+export const scrapeJobPage = (userId: string, url: string) =>
   Effect.gen(function* () {
     const firecrawl = yield* Firecrawl;
     return yield* cached(
-      { userId, url, kind },
+      { userId, url, kind: "JOB_PAGE" },
       decodeMarkdown,
       null,
       firecrawl.scrapeMarkdown(url),
     );
   });
-
-export const scrapeResume = (userId: string, url: string) => cachedMarkdown(userId, url, "RESUME");
-
-export const scrapeJobPage = (userId: string, url: string) =>
-  cachedMarkdown(userId, url, "JOB_PAGE");
 
 export const scrapeSourceListings = (userId: string, url: string) =>
   Effect.gen(function* () {

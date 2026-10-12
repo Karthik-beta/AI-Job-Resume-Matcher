@@ -8,7 +8,6 @@ import {
   PageCacheStore,
   type PageKey,
   scrapeJobPage,
-  scrapeResume,
   scrapeSourceListings,
 } from "./page-cache";
 
@@ -67,25 +66,16 @@ const setup = (options: { fail?: boolean } = {}) => {
 };
 
 describe("page cache", () => {
-  test("reuses a scraped resume and job page until cleared", async () => {
+  test("reuses a scraped job page until cleared", async () => {
     const { run, scraped } = setup();
     const program = Effect.gen(function* () {
-      const first = yield* scrapeResume("alice", "https://example.com/resume.pdf");
+      const first = yield* scrapeJobPage("alice", "https://example.com/job/1");
       yield* TestClock.adjust("30 days");
-      const second = yield* scrapeResume("alice", "https://example.com/resume.pdf");
-      const job = yield* scrapeJobPage("alice", "https://example.com/job/1");
-      const jobAgain = yield* scrapeJobPage("alice", "https://example.com/job/1");
-      return [first, second, job, jobAgain];
+      const second = yield* scrapeJobPage("alice", "https://example.com/job/1");
+      return [first, second];
     });
-    expect(await run(program)).toEqual(["Markdown 1", "Markdown 1", "Markdown 2", "Markdown 2"]);
-    expect(scraped).toEqual(["https://example.com/resume.pdf", "https://example.com/job/1"]);
-  });
-
-  test("keeps resume and job page entries apart for the same URL", async () => {
-    const { run, scraped } = setup();
-    const url = "https://example.com/page";
-    await run(Effect.all([scrapeResume("alice", url), scrapeJobPage("alice", url)]));
-    expect(scraped).toEqual([url, url]);
+    expect(await run(program)).toEqual(["Markdown 1", "Markdown 1"]);
+    expect(scraped).toEqual(["https://example.com/job/1"]);
   });
 
   test("caches source listings for 15 minutes", async () => {

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
 import { Notifier } from "../src/matching/discord";
+import { HttpFetch } from "../src/matching/download";
 import {
   MatchOutputInvalid,
   ModelUnsupported,
@@ -10,7 +11,10 @@ import {
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
+import { PdfParser } from "../src/matching/pdf";
+import { ResumeSource } from "../src/matching/resume-source";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
 
 const listing = (url: string, locations: string[] = [], title = `Job ${url}`): Listing => ({
@@ -97,6 +101,12 @@ describe("process run", () => {
       ),
       pageCacheStoreLayer(prisma),
       Layer.succeed(Notifier, notifier),
+      Layer.succeed(
+        ResumeSource,
+        ResumeSource.of({ resolve: () => Effect.succeed({ text: "Resume", hash: "resume-1" }) }),
+      ),
+      Layer.succeed(HttpFetch, fakeHttpFetch),
+      Layer.succeed(PdfParser, fakePdfParser),
     );
     await Effect.runPromise(processRun(prisma, runId).pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });

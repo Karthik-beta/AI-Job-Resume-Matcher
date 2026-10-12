@@ -117,7 +117,7 @@ model PageCache {
   userId    String
   url       String
   kind      CacheKind
-  content   Json // markdown string or extracted listings
+  content   Json // job page markdown, extracted listings, or the resume text with its hash
   expiresAt DateTime? // null = never expires
   createdAt DateTime  @default(now())
 
