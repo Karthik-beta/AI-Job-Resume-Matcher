@@ -1,7 +1,9 @@
 import type { SourceKind } from "@job-matcher/shared";
-import type { Effect } from "effect";
-import type { FirecrawlBlocked, ScrapeFailed } from "../errors";
+import { Effect } from "effect";
+import type { HttpFetch } from "../download";
+import { type FirecrawlBlocked, ScrapeFailed } from "../errors";
 import type { Firecrawl, Listing } from "../firecrawl";
+import type { HostLimiter } from "./http";
 
 export interface ListingSource {
   readonly url: string;
@@ -9,10 +11,35 @@ export interface ListingSource {
   readonly adapterKey: string | null;
 }
 
-export type AdapterServices = Firecrawl;
+export type AdapterServices = Firecrawl | HttpFetch | HostLimiter;
 
 export interface SourceAdapter {
   readonly fetchListings: (
     source: ListingSource,
   ) => Effect.Effect<readonly Listing[], ScrapeFailed | FirecrawlBlocked, AdapterServices>;
 }
+
+export const boardKey = (source: ListingSource, label: string) =>
+  source.adapterKey
+    ? Effect.succeed(source.adapterKey)
+    : Effect.fail(
+        new ScrapeFailed({
+          status: null,
+          message: `Set the ${label} board name for ${source.url}.`,
+        }),
+      );
+
+// The host of the source URL picks the EU data centre for ATSs that run one.
+export const isEuSource = (source: ListingSource) =>
+  URL.canParse(source.url) && new URL(source.url).hostname.toLowerCase().includes(".eu.");
+
+// The text handed to the evaluator for a listing that came with its job ad.
+export const listingPage = (listing: Listing & { readonly description: string }) =>
+  [
+    `# ${listing.title}`,
+    [listing.company, ...listing.locations].filter(Boolean).join(" · "),
+    listing.remote === true ? "Remote" : "",
+    listing.description,
+  ]
+    .filter(Boolean)
+    .join("\n\n");

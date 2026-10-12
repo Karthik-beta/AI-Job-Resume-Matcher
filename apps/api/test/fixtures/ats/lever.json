@@ -1,0 +1,58 @@
+[
+  {
+    "additionalPlain": "",
+    "categories": {
+      "commitment": "Regular Full Time (Salary)",
+      "department": "Customer Success",
+      "location": "Atlanta, Georgia",
+      "team": "Customer Success Team",
+      "allLocations": ["Atlanta, Georgia"]
+    },
+    "createdAt": 1788199939703,
+    "id": "ad208490-4052-4f91-a57e-433f2d1e484b",
+    "lists": [
+      {
+        "text": "Skill Set:",
+        "content": "\n<li>3+ years of customer relationship or account management experience working in software as a service (SaaS)</li>\n<li>Solutions and results-oriented mindset</li>\n<li>Experienced in customer-facing roles, including analyzing customer accounts, identifying churn signals and account growth opportunities</li>\n<li>Highly organized with strong project management and time management skills</li>\n<li>Hands-on experience with product training to external customers</li>\n<li>Proven experience delivering value-based communications</li>\n<li>Strong ability to facilitate meetings with customers and users o"
+      },
+      {
+        "text": "Within 1 Month You'll:",
+        "content": "\n<li>Attend Ramp Camp, which is Lever’s week-long version of onboarding where you’ll learn about all aspects of the business with a cross-functional group of new Leveroos</li>\n<li>Master Lever’s various product training demo frameworks, customized for various customer stakeholders, demonstrated by hosting sessions independently</li>\n<li>On a regular basis</li>\n<li>Conduct customer check-ins including planning agendas, documenting interactions and tracking various projects. Also on a regular basis, prepare impact reviews and present to customers in order to achieve alignment with customers and "
+      }
+    ],
+    "text": "Customer Success Manager",
+    "country": "US",
+    "workplaceType": "hybrid",
+    "hostedUrl": "https://jobs.lever.co/leverdemo/ad208490-4052-4f91-a57e-433f2d1e484b",
+    "applyUrl": "https://jobs.lever.co/leverdemo/ad208490-4052-4f91-a57e-433f2d1e484b/apply",
+    "descriptionPlain": "This is a test job - created by Alex Haugan, for testing candidate insights.\n \nJoin a scaling, tight-knit team that’s working directly with innovative talent acquisition teams and thought leaders across various industries and geographies to make hiring a strategic advantage for their organizations. You'll serve as an advisor to our customers and take a consultative approach to ensure customers are setup for long-term success as high performing hiring organizations using the Lever product suite.\n"
+  },
+  {
+    "additionalPlain": "",
+    "categories": {
+      "commitment": "Regular Full Time (Salary)",
+      "department": "People (HR)",
+      "location": "Houston, TX",
+      "team": "People",
+      "allLocations": ["Houston, TX"]
+    },
+    "createdAt": 1787600587936,
+    "id": "120b5976-ee4e-4dc5-b31b-2b1ca124460c",
+    "lists": [
+      {
+        "text": "Key Responsibilities",
+        "content": "<div>\n\n<li data-section-id=\"nckdia\" data-start=\"858\" data-end=\"939\">Perform comprehensive dental examinations, evaluations, and treatment planning.</li>\n<li data-section-id=\"16bo02r\" data-start=\"940\" data-end=\"1017\">Diagnose oral health conditions and develop individualized treatment plans.</li>\n<li data-section-id=\"itd6iv\" data-start=\"1018\" data-end=\"1139\">Provide general dentistry services, including fillings, crowns, bridges, extractions, and other restorative procedures.</li>\n<li data-section-id=\"c1isa8\" data-start=\"1140\" data-end=\"1206\">Review and interpret dental X-rays and other diagnos"
+      },
+      {
+        "text": "Qualifications",
+        "content": "<div>\n\n<li data-section-id=\"1rjlo9p\" data-start=\"2167\" data-end=\"2275\">Doctor of Dental Surgery (DDS) or Doctor of Dental Medicine (DMD) degree from an accredited dental school.</li>\n<li data-section-id=\"6qg2fx\" data-start=\"2276\" data-end=\"2323\">Active and unrestricted state dental license.</li>\n<li data-section-id=\"153hf6s\" data-start=\"2324\" data-end=\"2356\">Current CPR/BLS certification.</li>\n<li data-section-id=\"ctmppi\" data-start=\"2357\" data-end=\"2406\">DEA registration, if required for the position.</li>\n<li data-section-id=\"10mps44\" data-start=\"2407\" data-end=\"2478\">Proven experience provi"
+      }
+    ],
+    "text": "Dentist",
+    "country": "US",
+    "workplaceType": "onsite",
+    "hostedUrl": "https://jobs.lever.co/leverdemo/120b5976-ee4e-4dc5-b31b-2b1ca124460c",
+    "applyUrl": "https://jobs.lever.co/leverdemo/120b5976-ee4e-4dc5-b31b-2b1ca124460c/apply",
+    "descriptionPlain": ""
+  }
+]

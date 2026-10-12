@@ -2,6 +2,8 @@ import type { SourceKind } from "@job-matcher/shared";
 import { Effect } from "effect";
 import { ScrapeFailed } from "../errors";
 import type { SourceAdapter } from "./adapter";
+import { greenhouseAdapter } from "./greenhouse";
+import { leverAdapter } from "./lever";
 import { pageAdapter } from "./page";
 
 // Search sources arrive with AJM-92; until then a stray one fails instead of being scraped.
@@ -13,8 +15,8 @@ const searchAdapter: SourceAdapter = {
 };
 
 const adapters: Record<SourceKind, SourceAdapter> = {
-  GREENHOUSE: pageAdapter,
-  LEVER: pageAdapter,
+  GREENHOUSE: greenhouseAdapter,
+  LEVER: leverAdapter,
   ASHBY: pageAdapter,
   SMARTRECRUITERS: pageAdapter,
   RECRUITEE: pageAdapter,

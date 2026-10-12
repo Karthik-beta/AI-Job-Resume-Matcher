@@ -10,6 +10,8 @@ import { type PageCacheStore, scrapeJobPage, scrapeSourceListings } from "../mat
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
+import { listingPage } from "../matching/sources/adapter";
+import type { HostLimiter } from "../matching/sources/http";
 import { requirementsOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
@@ -17,6 +19,7 @@ export type RunServices =
   | Firecrawl
   | PageCacheStore
   | HttpFetch
+  | HostLimiter
   | PdfParser
   | ResumeSource
   | MatchEvaluator
@@ -30,6 +33,12 @@ const uniqueByUrl = (listings: readonly Listing[]) => {
   for (const listing of listings) if (!byUrl.has(listing.url)) byUrl.set(listing.url, listing);
   return [...byUrl.values()];
 };
+
+// A listing from an ATS API carries its job ad, so only page sources' jobs are scraped.
+const jobPageOf = (userId: string, job: Listing) =>
+  job.description === undefined
+    ? scrapeJobPage(userId, job.url)
+    : Effect.succeed(listingPage({ ...job, description: job.description }));
 
 const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
   Effect.tryPromise({
@@ -119,7 +128,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     const selected = eligible.filter(({ url }) => !done.has(url)).slice(0, settings.maxJobsPerRun);
 
     for (const job of selected) {
-      const outcome = yield* scrapeJobPage(userId, job.url).pipe(
+      const outcome = yield* jobPageOf(userId, job).pipe(
         Effect.flatMap((jobPage) =>
           evaluator.evaluate({
             resume: resume.text,

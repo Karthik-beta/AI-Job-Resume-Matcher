@@ -12,6 +12,7 @@ import {
   scrapeSourceListings,
 } from "./page-cache";
 import { liteParseText, makePdfParser, PdfParser } from "./pdf";
+import { HostLimiter, makeHostLimiter } from "./sources/http";
 
 const jobAd = new Uint8Array(
   await Bun.file(new URL("../../test/fixtures/job-ad.pdf", import.meta.url)).arrayBuffer(),
@@ -93,10 +94,11 @@ const setup = (options: { fail?: boolean; markdown?: string; respond?: Respond }
     Layer.succeed(Firecrawl, fake.firecrawl),
     Layer.succeed(HttpFetch, http),
     Layer.succeed(PdfParser, makePdfParser(liteParseText)),
+    Layer.effect(HostLimiter, makeHostLimiter(0)),
     TestClock.layer(),
   );
   const run = <A, E>(
-    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser>,
+    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser | HostLimiter>,
   ) => program.pipe(Effect.provide(layer), Effect.runPromise);
   return { ...memory, ...fake, requests, run };
 };

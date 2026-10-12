@@ -13,6 +13,7 @@ import { MatchEvaluator } from "../matching/evaluate";
 import { Firecrawl, Listing } from "../matching/firecrawl";
 import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
+import { hostLimiterLayer } from "../matching/sources/http";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -110,4 +111,5 @@ export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
   Layer.succeed(Notifier, fakeNotifier),
+  hostLimiterLayer,
 );

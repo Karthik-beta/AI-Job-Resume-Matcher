@@ -4,7 +4,18 @@ delete process.env["FIRECRAWL_API_KEY"];
 delete process.env["OPENROUTER_API_KEY"];
 process.env["PROVIDERS"] = "fake";
 
-const blockedHosts = ["firecrawl.dev", "openrouter.ai", "discord.com", "discordapp.com"];
+// The ATS hosts serve the public job board APIs the source adapters read.
+const blockedHosts = [
+  "firecrawl.dev",
+  "openrouter.ai",
+  "discord.com",
+  "discordapp.com",
+  "greenhouse.io",
+  "lever.co",
+  "ashbyhq.com",
+  "smartrecruiters.com",
+  "recruitee.com",
+];
 const realFetch = globalThis.fetch;
 
 const isBlocked = (input: string | URL | Request) => {

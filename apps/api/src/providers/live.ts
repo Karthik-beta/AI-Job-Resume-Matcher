@@ -6,6 +6,7 @@ import { firecrawlLayer } from "../matching/firecrawl";
 import { pdfParserLayer } from "../matching/pdf";
 import { resumeSourceLayer } from "../matching/resume-source";
 import { routingFromEnv } from "../matching/routing";
+import { hostLimiterLayer } from "../matching/sources/http";
 
 // Only the worker with live providers needs these keys.
 const ProviderKeys = Schema.Struct({
@@ -29,5 +30,6 @@ export const liveProvidersLayer = (model: string) => {
       routing: routingFromEnv(process.env),
     }),
     discordNotifierLayer,
+    hostLimiterLayer,
   );
 };

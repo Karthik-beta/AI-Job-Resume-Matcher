@@ -13,6 +13,7 @@ import { Firecrawl, type Listing } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
+import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
@@ -30,9 +31,17 @@ const listing = (url: string, locations: string[] = [], title = `Job ${url}`): L
 
 const sourceA = "https://board.example.com/a";
 const sourceB = "https://board.example.com/b";
+const sourceC = "https://board.example.com/c";
 const listings: Record<string, Listing[]> = {
   [sourceA]: [listing("1", ["Bengaluru"]), listing("2", ["Mumbai"]), listing("3")],
   [sourceB]: [listing("1", ["Bengaluru"], "Duplicate"), listing("4", ["Bengaluru"]), listing("5")],
+  [sourceC]: [
+    {
+      ...listing("6", ["Bengaluru"], "Described"),
+      remote: true,
+      description: "Build payment APIs.",
+    },
+  ],
 };
 
 type Verdict = "match" | "no match" | "invalid" | "auth";
@@ -114,6 +123,7 @@ describe("process run", () => {
       ),
       Layer.succeed(HttpFetch, fakeHttpFetch),
       Layer.succeed(PdfParser, fakePdfParser),
+      Layer.effect(HostLimiter, makeHostLimiter(0)),
     );
     await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
@@ -285,6 +295,20 @@ describe("process run", () => {
     const unchanged = await runWith(await startRun(), { resumeHash: "resume-2" });
     expect(unchanged.evaluated).toEqual([jobUrl("5")]);
     expect(unchanged.run.contextKey).toBe(changed.run.contextKey);
+  });
+
+  it("evaluates a listing's own description without scraping its page", async () => {
+    const source = await prisma.jobSource.create({ data: { userId, url: sourceC } });
+    const run = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+    });
+    const { run: finished, evaluated, scraped } = await runWith(run.id, {});
+
+    expect(scraped).toEqual([sourceC]);
+    expect(evaluated).toEqual([
+      "# Described\n\nExample · Bengaluru\n\nRemote\n\nBuild payment APIs.",
+    ]);
+    expect(finished).toMatchObject({ status: "COMPLETED", checked: 1, failed: 0 });
   });
 
   it("ignores a run that is no longer queued", async () => {
