@@ -95,8 +95,11 @@ export const userPrompt = ({ resume, jobPage, requirements }: MatchInput) => {
 const promptCacheKey = ({ resume, resumeHash }: MatchInput) =>
   resumeHash ?? createHash("sha256").update(resume).digest("hex");
 
-// OpenRouter answers a request no endpoint can serve, such as one over max_price, with 404 or 400.
-const priceCapPattern = /price|no endpoints/i;
+// OpenRouter answers a request no endpoint can serve, such as one over max_price, with a 404
+// ("No endpoints found…", "No allowed providers…") or a 503 ("…meets your routing requirements").
+const priceCapMessage = "No flex endpoint under the price cap";
+const noEndpointStatuses: ReadonlySet<number> = new Set([404, 503]);
+const noEndpointPattern = /price|no endpoints|no allowed providers|routing requirements/i;
 
 const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
   const { reason } = error;
@@ -104,10 +107,10 @@ const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
   if (status === undefined) {
     return new OpenRouterRequestFailed({ status: null, message: error.message });
   }
-  if ((status === 400 || status === 404) && priceCapPattern.test(error.message)) {
+  if (noEndpointStatuses.has(status) && noEndpointPattern.test(error.message)) {
     return new OpenRouterUnavailable({
       status,
-      message: `No flex endpoint under the price cap (${priceCapText(routing)}): ${error.message}`,
+      message: `${priceCapMessage} (${priceCapText(routing)}): ${error.message}`,
     });
   }
   return openRouterErrorFromStatus(status, error.message);
@@ -118,8 +121,9 @@ const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
 // capacity, so every 429 backs off.
 const capacityRetries = 5;
 
-const isCapacityError = (error: { readonly status: number | null }) =>
-  error.status === 429 || error.status === 503;
+// A 503 can also mean no endpoint meets the price cap, which waiting won't fix.
+const isCapacityError = (error: { readonly status: number | null; readonly message: string }) =>
+  (error.status === 429 || error.status === 503) && !error.message.startsWith(priceCapMessage);
 
 // Bun's fetch drops a connection that is idle for 5 minutes, and flex completions can take longer.
 export const completionRequestInit: BunFetchRequestInit = { timeout: 15 * 60 * 1000 };

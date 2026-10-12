@@ -34,7 +34,9 @@ const RoutingEnv = Schema.Struct({
 });
 
 export const routingFromEnv = (env: Record<string, string | undefined>): Routing => {
-  const decoded = Schema.decodeUnknownSync(RoutingEnv)(env);
+  // An empty variable, as left in a copied .env file, keeps the default.
+  const set = Object.fromEntries(Object.entries(env).filter(([, value]) => value?.trim()));
+  const decoded = Schema.decodeUnknownSync(RoutingEnv)(set);
   return {
     serviceTier: decoded.OPENROUTER_SERVICE_TIER,
     providers: decoded.OPENROUTER_PROVIDERS.split(",")

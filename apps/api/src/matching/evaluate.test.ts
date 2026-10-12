@@ -307,7 +307,8 @@ describe("evaluate errors", () => {
 
   test.each([
     [404, "No endpoints found matching your data policy and max price."],
-    [400, "No endpoints available under the requested price."],
+    [404, "No allowed providers are available for the selected model."],
+    [503, "There is no available model provider that meets your routing requirements."],
   ])("stops the run when HTTP %p rejects the price cap", async (status, message) => {
     const error = await failureOf({ status, body: { error: { code: status, message } } });
     expect(error).toMatchObject({ _tag: "OpenRouterUnavailable", status });
