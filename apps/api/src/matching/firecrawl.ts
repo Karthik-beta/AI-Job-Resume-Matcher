@@ -109,6 +109,12 @@ export interface SiteMap {
 
 export type FirecrawlError = FirecrawlBlocked | ScrapeFailed;
 
+// The cloud plan's credits (GET /v2/team/credit-usage); a null period end is unknown.
+export interface CreditUsage {
+  readonly remainingCredits: number;
+  readonly billingPeriodEnd: string | null;
+}
+
 // Firecrawl, wherever it runs (see scrape-router.ts for cloud, local and hybrid).
 export class Firecrawl extends Context.Service<
   Firecrawl,
@@ -143,11 +149,14 @@ export interface ScrapeBackend {
     url: string,
     options: MapOptions,
   ) => Effect.Effect<{ readonly links: readonly MappedLink[] }, FirecrawlRequestFailed>;
+  // Only the cloud has credits; a local instance never asks.
+  readonly creditUsage: Effect.Effect<CreditUsage, FirecrawlRequestFailed>;
 }
 
 export interface ScrapeClient {
   readonly scrape: ScrapePage;
   readonly map: MapSite;
+  readonly creditUsage: Effect.Effect<CreditUsage, unknown>;
 }
 
 // Page chrome that holds links but no listings.
@@ -234,6 +243,8 @@ export const makeBackend = (via: Via, client: ScrapeClient, limiter: Limiter): S
     via,
     scrape: (url, request) => rateLimited(url, client.scrape(url, request)),
     map: (url, options) => rateLimited(url, client.map(url, options)),
+    // The team endpoint is not a scrape, so it skips the scrape rate limit.
+    creditUsage: client.creditUsage.pipe(Effect.mapError(toRequestFailed)),
   };
 };
 
@@ -319,5 +330,14 @@ export const sdkClient = (options: { readonly apiKey: string; readonly apiUrl?: 
       }),
     map: (url, options) =>
       Effect.tryPromise({ try: () => client.map(url, { ...options }), catch: (cause) => cause }),
+    creditUsage: Effect.tryPromise({
+      try: () => client.getCreditUsage(),
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.map(({ remainingCredits, billingPeriodEnd }) => ({
+        remainingCredits,
+        billingPeriodEnd: billingPeriodEnd ?? null,
+      })),
+    ),
   } satisfies ScrapeClient;
 };

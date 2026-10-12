@@ -1,5 +1,5 @@
 import { isDiscordWebhookUrl } from "@job-matcher/shared";
-import { Effect, Layer, Schema } from "effect";
+import { Clock, Effect, Layer, Schema } from "effect";
 import { Notifier } from "../matching/discord";
 import { HttpFetch } from "../matching/download";
 import {
@@ -11,7 +11,6 @@ import {
 } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import {
-  Firecrawl,
   FirecrawlRequestFailed,
   Listing,
   type ScrapeBackend,
@@ -23,11 +22,12 @@ import { ListingExtractor } from "../matching/listing-extractor";
 import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
 import {
+  creditReserveFrom,
   type FirecrawlMode,
   firecrawlModeFrom,
   healthyScrapes,
-  makeScrapeRouter,
   type RouterConfig,
+  routerContext,
   ScrapeHealth,
 } from "../matching/scrape-router";
 import { memoryScrapeRouteStore } from "../matching/scrape-routes";
@@ -90,28 +90,44 @@ const challengePage: ScrapedPage = {
   metadata: { title: "Just a moment...", statusCode: 403 },
 };
 
+export interface FakeCredits {
+  readonly remainingCredits: number;
+  // How far ahead the billing period ends; null leaves the end unknown.
+  readonly periodDaysLeft: number | null;
+}
+
+const dayMs = 86_400_000;
+const defaultCredits: FakeCredits = { remainingCredits: 1_000, periodDaysLeft: 20 };
+
 // Both instances serve the fixtures, except that `?fake-blocked` pages block the local one
 // (so hybrid runs retry them on the cloud). No map has job links, so sources that use one
-// fall back to their page.
-const fakeBackend = (via: Via): ScrapeBackend => ({
+// fall back to their page. The cloud plan has the given credits left.
+const fakeBackend = (via: Via, credits: FakeCredits = defaultCredits): ScrapeBackend => ({
   via,
   scrape: (url, request) =>
     via === "local" && URL.canParse(url) && new URL(url).searchParams.has("fake-blocked")
       ? Effect.succeed(challengePage)
       : fixturePage(url, request),
   map: (url) => fixturePage(url, { formats: [] }).pipe(Effect.as({ links: [] })),
+  creditUsage: Effect.map(Clock.currentTimeMillis, (now) => ({
+    remainingCredits: credits.remainingCredits,
+    billingPeriodEnd:
+      credits.periodDaysLeft === null
+        ? null
+        : new Date(now + credits.periodDaysLeft * dayMs).toISOString(),
+  })),
 });
 
-const fakeRouterConfig = (mode: FirecrawlMode): RouterConfig => {
+const fakeRouterConfig = (mode: FirecrawlMode, credits?: FakeCredits): RouterConfig => {
   switch (mode) {
     case "cloud":
-      return { mode, cloud: fakeBackend("cloud"), cloudProxy: "basic" };
+      return { mode, cloud: fakeBackend("cloud", credits), cloudProxy: "basic" };
     case "local":
       return { mode, local: fakeBackend("local") };
     case "hybrid":
       return {
         mode,
-        cloud: fakeBackend("cloud"),
+        cloud: fakeBackend("cloud", credits),
         local: fakeBackend("local"),
         routes: memoryScrapeRouteStore().store,
       };
@@ -119,9 +135,17 @@ const fakeRouterConfig = (mode: FirecrawlMode): RouterConfig => {
 };
 
 // FIRECRAWL_MODE picks the fake instances, so each mode can be tried without Firecrawl.
-export const fakeFirecrawlLayer = (mode: FirecrawlMode) =>
+export const fakeFirecrawlLayer = (
+  mode: FirecrawlMode,
+  options: { readonly credits?: FakeCredits; readonly creditReserve?: number } = {},
+) =>
   Layer.mergeAll(
-    Layer.succeed(Firecrawl, makeScrapeRouter(fakeRouterConfig(mode))),
+    Layer.succeedContext(
+      routerContext(
+        fakeRouterConfig(mode, options.credits),
+        options.creditReserve ?? creditReserveFrom(process.env),
+      ),
+    ),
     Layer.succeed(ScrapeHealth, healthyScrapes),
   );
 

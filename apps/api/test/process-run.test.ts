@@ -3,6 +3,7 @@ import { Effect, Layer } from "effect";
 import { Notifier } from "../src/matching/discord";
 import { HttpFetch } from "../src/matching/download";
 import {
+  FirecrawlBlocked,
   MatchOutputInvalid,
   ModelUnsupported,
   NotifyFailed,
@@ -15,7 +16,12 @@ import { ListingExtractor } from "../src/matching/listing-extractor";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
-import { LocalFirecrawlDown, ScrapeHealth } from "../src/matching/scrape-router";
+import {
+  FirecrawlPlan,
+  LocalFirecrawlDown,
+  RunCloudBudget,
+  ScrapeHealth,
+} from "../src/matching/scrape-router";
 import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
 import { TitleTriage } from "../src/matching/triage";
 import { PrismaService } from "../src/prisma/prisma.service";
@@ -75,15 +81,26 @@ const jobHtml: Record<string, string> = {
 
 type Verdict = "match" | "no match" | "invalid" | "auth";
 
+// Each scrape costs a credit, refused as the router refuses it in cloud mode.
+const spendCredit = Effect.gen(function* () {
+  const budget = yield* RunCloudBudget;
+  if (!(yield* budget.allows(1))) {
+    return yield* new FirecrawlBlocked({ status: 402, message: yield* budget.refusal });
+  }
+  yield* budget.spent(1);
+});
+
+const dayMs = 86_400_000;
+
 describe("process run", () => {
   const prisma = new PrismaService();
   const userId = `test-${crypto.randomUUID()}`;
   const contextKey = "test-context";
   let sourceIds: string[];
 
-  const startRun = async () => {
+  const startRun = async (trigger: "MANUAL" | "SCHEDULED" = "MANUAL") => {
     const run = await prisma.run.create({
-      data: { userId, trigger: "MANUAL", contextKey, sourceIds },
+      data: { userId, trigger, contextKey, sourceIds },
     });
     return run.id;
   };
@@ -98,6 +115,8 @@ describe("process run", () => {
       resumeHash?: string;
       // Scores by job title (3 when missing), or the error the triage request fails with.
       triage?: Record<string, number> | OpenRouterRequestFailed | OpenRouterAuthError;
+      // A cloud plan with these credits; without one the run is in local mode.
+      cloud?: { remainingCredits: number; billingPeriodEnd: string | null };
     },
   ) => {
     const triaged: string[][] = [];
@@ -128,14 +147,16 @@ describe("process run", () => {
       scrapeJob: (url) =>
         Effect.sync(() => {
           scraped.push(url);
-          return {
+        }).pipe(
+          Effect.andThen(spendCredit),
+          Effect.as({
             markdown: `Page ${url}`,
             rawHtml: jobHtml[url] ?? null,
             usage: { via: "cloud", credits: 1 } as const,
-          };
-        }),
+          }),
+        ),
       scrapeListingPage: (url, options) =>
-        Effect.sync(() => {
+        Effect.map(spendCredit, () => {
           scraped.push(url);
           // Every page embeds a Greenhouse board, which only a first check looks for.
           const embed = options?.withHtml ? ["https://job-boards.greenhouse.io/acme"] : [];
@@ -189,6 +210,14 @@ describe("process run", () => {
       Layer.succeed(PdfParser, fakePdfParser),
       Layer.effect(HostLimiter, makeHostLimiter(0)),
       Layer.succeed(ScrapeHealth, ScrapeHealth.of({ check: options.scrapeHealth ?? Effect.void })),
+      Layer.succeed(
+        FirecrawlPlan,
+        FirecrawlPlan.of({
+          mode: options.cloud ? "cloud" : "local",
+          creditReserve: 50,
+          creditUsage: Effect.succeed(options.cloud ?? null),
+        }),
+      ),
     );
     await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
@@ -563,6 +592,79 @@ describe("process run", () => {
       where: { userId, jobUrl: { in: [oldUrl, jobUrl("4")] } },
     });
     expect(matches).toMatchObject([{ jobUrl: oldUrl, status: "APPLIED", reason: "Strong fit" }]);
+  });
+
+  describe("with the credit guard", () => {
+    const periodEnd = "2099-01-01T00:00:00.000Z";
+    // Nothing cached, so every source and job page is scraped.
+    const fresh = async () => {
+      await prisma.jobResult.deleteMany({ where: { userId } });
+      await prisma.pageCache.deleteMany({ where: { userId } });
+    };
+
+    it("stops a cloud run whose sources would not fit above the reserve", async () => {
+      await fresh();
+      const { run, scraped } = await runWith(await startRun(), {
+        cloud: { remainingCredits: 51, billingPeriodEnd: periodEnd },
+      });
+      expect(scraped).toEqual([]);
+      expect(run).toMatchObject({
+        status: "STOPPED",
+        stopReason: "Firecrawl credit reserve reached (51 left until 2099-01-01)",
+      });
+    });
+
+    it("stops a cloud run once it has spent down to the reserve", async () => {
+      await fresh();
+      const { run, evaluated } = await runWith(await startRun(), {
+        cloud: { remainingCredits: 54, billingPeriodEnd: periodEnd },
+      });
+      // Two credits for the sources, two for jobs; the third job would dip into the reserve.
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("3")]);
+      expect(run).toMatchObject({
+        status: "STOPPED",
+        stopReason: "Firecrawl credit reserve reached (50 left until 2099-01-01)",
+        checked: 2,
+      });
+    });
+
+    it("keeps a scheduled run to its daily share, counting cached pages as free", async () => {
+      await fresh();
+      // A cached page costs nothing, so job 4 fits after the share is spent.
+      await prisma.pageCache.create({
+        data: {
+          userId,
+          url: jobUrl("4"),
+          kind: "JOB_PAGE",
+          content: { markdown: `Page ${jobUrl("4")}`, posting: null },
+        },
+      });
+      // 40 credits above the reserve over 10 days: 4 today, 2 of them for the sources.
+      const end = new Date(Date.now() + 10 * dayMs - 60_000).toISOString();
+      const { run, evaluated, scraped } = await runWith(await startRun("SCHEDULED"), {
+        cloud: { remainingCredits: 90, billingPeriodEnd: end },
+      });
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+      expect(scraped).toEqual([sourceA, sourceB, jobUrl("1"), jobUrl("3")]);
+      expect(run).toMatchObject({ status: "COMPLETED", checked: 3 });
+
+      // A manual run may use more than the day's share.
+      await fresh();
+      const manual = await runWith(await startRun(), {
+        cloud: { remainingCredits: 90, billingPeriodEnd: end },
+      });
+      expect(manual.evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    });
+
+    it("trims a scheduled run to nothing when today's share is spent", async () => {
+      await fresh();
+      const end = new Date(Date.now() + 10 * dayMs - 60_000).toISOString();
+      const { run, evaluated } = await runWith(await startRun("SCHEDULED"), {
+        cloud: { remainingCredits: 70, billingPeriodEnd: end },
+      });
+      expect(evaluated).toEqual([]);
+      expect(run).toMatchObject({ status: "COMPLETED", checked: 0 });
+    });
   });
 
   it("ignores a run that is no longer queued", async () => {

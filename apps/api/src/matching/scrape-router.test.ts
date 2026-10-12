@@ -12,12 +12,16 @@ import {
 import {
   type CloudBudget,
   checkLocalFirecrawl,
+  creditReserveFrom,
+  FirecrawlPlan,
   firecrawlConfigFrom,
   firecrawlLayer,
   firecrawlModeFrom,
   makeScrapeRouter,
   needsCloudMessage,
+  planOf,
   type RouterConfig,
+  RunCloudBudget,
   ScrapeHealth,
 } from "./scrape-router";
 import { memoryScrapeRouteStore, ScrapeRouteStore } from "./scrape-routes";
@@ -25,6 +29,17 @@ import { memoryScrapeRouteStore, ScrapeRouteStore } from "./scrape-routes";
 type Reply = ScrapedPage | FirecrawlRequestFailed;
 
 const jobText = `# Backend Engineer\n\n${"Build payment APIs in TypeScript. ".repeat(20)}`;
+
+// A budget that allows the given number of requests and records what was spent.
+const budgetOf = (requests: number) => {
+  const spent: number[] = [];
+  const budget: CloudBudget = {
+    allows: () => Effect.succeed(spent.length < requests),
+    spent: (credits) => Effect.sync(() => void spent.push(credits)),
+    refusal: Effect.succeed("Firecrawl credit reserve reached (50 left until 2026-11-01)"),
+  };
+  return { budget, spent };
+};
 
 // Serves each URL's scripted reply, or a normal job page, and records the requests.
 const fakeBackend = (via: Via, replies: Record<string, Reply> = {}) => {
@@ -47,6 +62,10 @@ const fakeBackend = (via: Via, replies: Record<string, Reply> = {}) => {
         calls.push({ url, request: "map" });
         return reply(url).pipe(Effect.as({ links: [{ url: `${url}/jobs/1` }] }));
       }),
+    creditUsage:
+      via === "cloud"
+        ? Effect.succeed({ remainingCredits: 300, billingPeriodEnd: "2026-11-01T00:00:00Z" })
+        : Effect.fail(failure(401, "Unauthorized")),
   };
   return { backend, calls };
 };
@@ -65,12 +84,15 @@ const run = <A, E>(effect: Effect.Effect<A, E>) =>
 
 const url = "https://acme.com/jobs/1";
 
+const firecrawlScrape = (firecrawl: Firecrawl["Service"]) => firecrawl.scrapeJob(url);
+
 describe("firecrawlConfigFrom", () => {
   test("defaults to the cloud with the basic proxy", () => {
     expect(firecrawlConfigFrom({ FIRECRAWL_API_KEY: "fc-key" })).toEqual({
       mode: "cloud",
       apiKey: "fc-key",
       cloudProxy: "basic",
+      creditReserve: 50,
     });
   });
 
@@ -81,7 +103,7 @@ describe("firecrawlConfigFrom", () => {
         FIRECRAWL_API_KEY: "fc-key",
         FIRECRAWL_CLOUD_PROXY: "auto",
       }),
-    ).toEqual({ mode: "cloud", apiKey: "fc-key", cloudProxy: "auto" });
+    ).toEqual({ mode: "cloud", apiKey: "fc-key", cloudProxy: "auto", creditReserve: 50 });
     expect(
       firecrawlConfigFrom({
         FIRECRAWL_MODE: "local",
@@ -93,8 +115,25 @@ describe("firecrawlConfigFrom", () => {
         FIRECRAWL_MODE: "hybrid",
         FIRECRAWL_API_KEY: "fc-key",
         FIRECRAWL_LOCAL_URL: "http://localhost:3002",
+        FIRECRAWL_CREDIT_RESERVE: "100",
       }),
-    ).toEqual({ mode: "hybrid", apiKey: "fc-key", localUrl: "http://localhost:3002" });
+    ).toEqual({
+      mode: "hybrid",
+      apiKey: "fc-key",
+      localUrl: "http://localhost:3002",
+      creditReserve: 100,
+    });
+  });
+
+  test("reads the credit reserve", () => {
+    expect(creditReserveFrom({})).toBe(50);
+    expect(creditReserveFrom({ FIRECRAWL_CREDIT_RESERVE: "0" })).toBe(0);
+    expect(() => creditReserveFrom({ FIRECRAWL_CREDIT_RESERVE: "-5" })).toThrow(
+      'FIRECRAWL_CREDIT_RESERVE must be a whole number of credits, got "-5".',
+    );
+    expect(() =>
+      firecrawlConfigFrom({ FIRECRAWL_API_KEY: "fc-key", FIRECRAWL_CREDIT_RESERVE: "lots" }),
+    ).toThrow("FIRECRAWL_CREDIT_RESERVE must be a whole number");
   });
 
   test.each<[Record<string, string>, string]>([
@@ -167,6 +206,23 @@ describe("cloud mode", () => {
     });
   });
 
+  test("stops the run once the budget refuses a request, and counts what it spent", async () => {
+    const { firecrawl, cloud } = router();
+    const { budget, spent } = budgetOf(1);
+    const scrape = firecrawlScrape(firecrawl).pipe(Effect.provideService(RunCloudBudget, budget));
+    expect(await run(scrape)).toMatchObject({ ok: true });
+    expect(await run(scrape)).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "FirecrawlBlocked",
+        status: 402,
+        message: "Firecrawl credit reserve reached (50 left until 2026-11-01)",
+      },
+    });
+    expect(cloud.calls).toHaveLength(1);
+    expect(spent).toEqual([1]);
+  });
+
   test("maps a site for one credit", async () => {
     const { firecrawl } = router();
     expect(await run(firecrawl.map("https://acme.com", { search: "job", limit: 5 }))).toEqual({
@@ -233,18 +289,13 @@ describe("local mode", () => {
 });
 
 describe("hybrid mode", () => {
-  const router = (
-    local: Record<string, Reply> = {},
-    cloud: Record<string, Reply> = {},
-    budget?: CloudBudget,
-  ) => {
+  const router = (local: Record<string, Reply> = {}, cloud: Record<string, Reply> = {}) => {
     const instances = { local: fakeBackend("local", local), cloud: fakeBackend("cloud", cloud) };
     const config: RouterConfig = {
       mode: "hybrid",
       local: instances.local.backend,
       cloud: instances.cloud.backend,
       routes: memoryScrapeRouteStore().store,
-      ...(budget ? { budget } : {}),
     };
     return { firecrawl: makeScrapeRouter(config), ...instances };
   };
@@ -305,20 +356,22 @@ describe("hybrid mode", () => {
   });
 
   test("asks the budget before the cloud and reports what was spent", async () => {
-    const spent: number[] = [];
-    const budget = (allows: boolean): CloudBudget => ({
-      allows: Effect.succeed(allows),
-      spent: (credits) => Effect.sync(() => void spent.push(credits)),
-    });
-    const refused = router({ [url]: challenge }, {}, budget(false));
-    expect(await run(refused.firecrawl.scrapeJob(url))).toMatchObject({
-      ok: false,
-      error: { message: needsCloudMessage },
-    });
+    const refused = router({ [url]: challenge });
+    const none = budgetOf(0);
+    expect(
+      await run(
+        refused.firecrawl.scrapeJob(url).pipe(Effect.provideService(RunCloudBudget, none.budget)),
+      ),
+    ).toEqual({ ok: false, error: new ScrapeFailed({ status: null, message: needsCloudMessage }) });
     expect(refused.cloud.calls).toEqual([]);
-    const allowed = router({ [url]: challenge }, {}, budget(true));
-    expect(await run(allowed.firecrawl.scrapeJob(url))).toMatchObject({ ok: true });
-    expect(spent).toEqual([1]);
+    const allowed = router({ [url]: challenge });
+    const one = budgetOf(1);
+    expect(
+      await run(
+        allowed.firecrawl.scrapeJob(url).pipe(Effect.provideService(RunCloudBudget, one.budget)),
+      ),
+    ).toMatchObject({ ok: true });
+    expect(one.spent).toEqual([1]);
   });
 
   test("maps on the cloud only when the local map is blocked", async () => {
@@ -386,7 +439,12 @@ describe("firecrawlLayer", () => {
     );
 
   test("checks the local instance only when one is used", async () => {
-    const cloud = firecrawlLayer({ mode: "cloud", apiKey: "fc-key", cloudProxy: "basic" });
+    const cloud = firecrawlLayer({
+      mode: "cloud",
+      apiKey: "fc-key",
+      cloudProxy: "basic",
+      creditReserve: 50,
+    });
     expect(await health(cloud)).toMatchObject({ ok: true });
     const localUrl = "http://127.0.0.1:9";
     const message = `Local Firecrawl is not running at ${localUrl}`;
@@ -395,7 +453,42 @@ describe("firecrawlLayer", () => {
       error: { message },
     });
     expect(
-      await health(firecrawlLayer({ mode: "hybrid", apiKey: "fc-key", localUrl })),
+      await health(
+        firecrawlLayer({ mode: "hybrid", apiKey: "fc-key", localUrl, creditReserve: 0 }),
+      ),
     ).toMatchObject({ ok: false, error: { message } });
+  });
+
+  test("provides the plan of the mode", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        return yield* FirecrawlPlan;
+      }).pipe(
+        Effect.provide(firecrawlLayer({ mode: "local", localUrl: "http://127.0.0.1:9" })),
+        Effect.provideService(ScrapeRouteStore, memoryScrapeRouteStore().store),
+      ),
+    );
+    expect(plan).toMatchObject({ ok: true, value: { mode: "local", creditReserve: 0 } });
+  });
+});
+
+describe("planOf", () => {
+  test("reads the cloud plan's credits, and none in local mode", async () => {
+    const cloud = fakeBackend("cloud").backend;
+    const cloudPlan = planOf({ mode: "cloud", cloud, cloudProxy: "basic" }, 50);
+    expect(await run(cloudPlan.creditUsage)).toEqual({
+      ok: true,
+      value: { remainingCredits: 300, billingPeriodEnd: "2026-11-01T00:00:00Z" },
+    });
+    const local = planOf({ mode: "local", local: fakeBackend("local").backend }, 0);
+    expect(await run(local.creditUsage)).toEqual({ ok: true, value: null });
+    const unauthorized = planOf(
+      { mode: "cloud", cloud: fakeBackend("local").backend, cloudProxy: "basic" },
+      50,
+    );
+    expect(await run(unauthorized.creditUsage)).toMatchObject({
+      ok: false,
+      error: { _tag: "FirecrawlBlocked", status: 401 },
+    });
   });
 });

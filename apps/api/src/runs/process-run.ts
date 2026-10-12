@@ -2,10 +2,17 @@ import type { SourceKind } from "@job-matcher/shared";
 import { Clock, Effect } from "effect";
 import type { JobResult, PrismaClient } from "../generated/prisma/client";
 import { contextKey as contextKeyOf } from "../matching/context-key";
+import {
+  fitJobs,
+  jobCredits,
+  makeRunCredits,
+  type RunCredits,
+  sourceCredits,
+} from "../matching/credit-guard";
 import { canonicalUrl, dedupeListings } from "../matching/dedupe";
 import { Notifier } from "../matching/discord";
 import type { HttpFetch } from "../matching/download";
-import { SaveFailed, stopsRun } from "../matching/errors";
+import { FirecrawlBlocked, SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
 import { evaluationText, isExpired, withPosting } from "../matching/job-posting";
@@ -14,7 +21,7 @@ import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matchi
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
-import { ScrapeHealth } from "../matching/scrape-router";
+import { FirecrawlPlan, RunCloudBudget, ScrapeHealth } from "../matching/scrape-router";
 import type { HostLimiter } from "../matching/sources/http";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
@@ -30,6 +37,7 @@ export type RunServices =
   | PdfParser
   | ResumeSource
   | ScrapeHealth
+  | FirecrawlPlan
   | MatchEvaluator
   | TitleTriage
   | Notifier;
@@ -71,7 +79,16 @@ const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
       }),
   });
 
-export const processRun = (prisma: PrismaClient, runId: string, model: string) => {
+// Every cloud request in the run is counted against its credit allowance (see credit-guard.ts).
+export const processRun = (prisma: PrismaClient, runId: string, model: string) =>
+  Effect.gen(function* () {
+    const credits = yield* makeRunCredits;
+    return yield* runWith(prisma, runId, model, credits).pipe(
+      Effect.provideService(RunCloudBudget, credits.budget),
+    );
+  });
+
+const runWith = (prisma: PrismaClient, runId: string, model: string, credits: RunCredits) => {
   const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
     query(() =>
       prisma.run.update({
@@ -106,10 +123,24 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     const notifier = yield* Notifier;
     const resumeSource = yield* ResumeSource;
     const scrapeHealth = yield* ScrapeHealth;
+    const { mode } = yield* FirecrawlPlan;
+    const scheduled = run.trigger === "SCHEDULED";
 
     const prepared = yield* Effect.gen(function* () {
       yield* evaluator.preflight;
       yield* scrapeHealth.check;
+      const allowance = yield* credits.start(scheduled);
+      // A cloud run stops up front when even its sources would not fit.
+      if (allowance && mode === "cloud") {
+        let needed = 0;
+        for (const source of sources) needed += yield* sourceCredits(userId, source, mode);
+        if (needed > allowance.limit) {
+          return yield* new FirecrawlBlocked({
+            status: 402,
+            message: yield* credits.budget.refusal,
+          });
+        }
+      }
       const resume = yield* resumeSource.resolve(userId, resumeUrl);
       const listings: Listing[] = [];
       // As in dedupeListings, the first source to list a job page decides how its ad is read.
@@ -216,7 +247,22 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
         );
       }
     }
-    const selected = ranked.slice(0, settings.maxJobsPerRun);
+    let selected = ranked.slice(0, settings.maxJobsPerRun);
+    // A scheduled run keeps to its share of the credits; jobs read for free always fit.
+    const left = yield* credits.left;
+    if (scheduled && left !== null) {
+      const costs: number[] = [];
+      for (const job of selected) {
+        costs.push(yield* jobCredits(userId, job, kindByUrl.get(job.url) ?? "PAGE", mode));
+      }
+      const fitting = fitJobs(selected, costs, left);
+      if (fitting.length < selected.length) {
+        yield* Effect.logInfo(
+          `Run ${runId} checks ${fitting.length} of ${selected.length} jobs to keep to today's Firecrawl credits.`,
+        );
+      }
+      selected = fitting;
+    }
 
     for (const job of selected) {
       const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(

@@ -38,7 +38,8 @@ const fakeScrape = (replies: readonly Reply[]) => {
     next(url, options).pipe(
       Effect.map((page) => ({ links: (page.links ?? []).map((link) => ({ url: link })) })),
     );
-  return { calls, scrape, map };
+  const creditUsage = Effect.succeed({ remainingCredits: 500, billingPeriodEnd: null });
+  return { calls, scrape, map, creditUsage };
 };
 
 // Runs the program on a cloud instance with a test clock and fast-forwards through every sleep.
@@ -327,6 +328,28 @@ describe("SDK client", () => {
       });
     } finally {
       scrape.mockRestore();
+    }
+  });
+
+  test("reads the plan's credits", async () => {
+    const usage = spyOn(FirecrawlClient.prototype, "getCreditUsage").mockResolvedValue({
+      remainingCredits: 420,
+      planCredits: 1000,
+    });
+    try {
+      const result = await sdkClient({ apiKey: "test-key" }).creditUsage.pipe(Effect.runPromise);
+      expect(result).toEqual({ remainingCredits: 420, billingPeriodEnd: null });
+      const backend = makeBackend("cloud", sdkClient({ apiKey: "test-key" }), {
+        waitForTurn: () => Effect.void,
+        backOff: () => Effect.void,
+      });
+      usage.mockRejectedValue(new SdkError("Unauthorized", 401));
+      expect(await backend.creditUsage.pipe(Effect.flip, Effect.runPromise)).toMatchObject({
+        _tag: "FirecrawlRequestFailed",
+        status: 401,
+      });
+    } finally {
+      usage.mockRestore();
     }
   });
 

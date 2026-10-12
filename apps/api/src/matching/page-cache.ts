@@ -56,6 +56,16 @@ export const prismaPageCacheStore = (prisma: PrismaClient) =>
 export const pageCacheStoreLayer = (prisma: PrismaClient) =>
   Layer.succeed(PageCacheStore, prismaPageCacheStore(prisma));
 
+const isFresh = (hit: CachedPage | null, now: number) =>
+  hit !== null && (hit.expiresAt === null || hit.expiresAt.getTime() > now);
+
+// Whether a read of the key would be served from the cache, for the credit guard's estimates.
+export const isCached = (key: PageKey) =>
+  Effect.gen(function* () {
+    const hit = yield* (yield* PageCacheStore).get(key);
+    return isFresh(hit, yield* Clock.currentTimeMillis);
+  });
+
 // A missing, expired or unreadable row counts as a miss. An expired row is handed to the
 // scrape, which may reuse it. Failed scrapes are never stored.
 const cached = <A extends Prisma.InputJsonValue, E, R>(
