@@ -3,13 +3,16 @@ import { FirecrawlClient, SdkError } from "@mendable/firecrawl-js";
 import { Clock, Effect, type Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import {
-  Firecrawl,
-  firecrawlLayer,
+  cloudLimiter,
+  type Firecrawl,
+  localLimiter,
   type MapOptions,
-  makeFirecrawl,
+  makeBackend,
   type ScrapedPage,
   type ScrapeRequest,
+  sdkClient,
 } from "./firecrawl";
+import { makeScrapeRouter } from "./scrape-router";
 
 interface Call {
   readonly url: string;
@@ -38,20 +41,23 @@ const fakeScrape = (replies: readonly Reply[]) => {
   return { calls, scrape, map };
 };
 
-// Runs the program with a test clock and fast-forwards through every sleep.
+// Runs the program on a cloud instance with a test clock and fast-forwards through every sleep.
 const run = <A, E>(
   replies: readonly Reply[],
   program: (firecrawl: Firecrawl["Service"]) => Effect.Effect<A, E>,
 ) => {
   const fake = fakeScrape(replies);
   return Effect.gen(function* () {
-    const firecrawl = yield* makeFirecrawl(fake);
+    const cloud = makeBackend("cloud", fake, yield* cloudLimiter);
+    const firecrawl = makeScrapeRouter({ mode: "cloud", cloud, cloudProxy: "basic" });
     const fiber = yield* Effect.forkChild(Effect.exit(program(firecrawl)));
     yield* TestClock.adjust("1 hour");
     const exit = yield* Fiber.join(fiber);
     return { exit, calls: fake.calls };
   }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
 };
+
+const cloudUsage = { via: "cloud", credits: 1 } as const;
 
 const startTimes = (calls: readonly Call[]) => calls.map(({ at }) => at - (calls[0]?.at ?? 0));
 
@@ -74,10 +80,16 @@ describe("scrapeMarkdown", () => {
   test("returns the page markdown", async () => {
     const url = "https://example.com/resume.pdf";
     const { exit, calls } = await run([{ markdown: "Resume text" }], (f) => f.scrapeMarkdown(url));
-    expect(successOf(exit)).toBe("Resume text");
+    expect(successOf(exit)).toEqual({ markdown: "Resume text", usage: cloudUsage });
     expect(calls.map(({ url, request }) => ({ url, request }))).toEqual([
-      { url, request: { formats: ["markdown"] } },
+      { url, request: { formats: ["markdown"], proxy: "basic" } },
     ]);
+  });
+
+  test("counts the credits Firecrawl reports", async () => {
+    const page = { markdown: "Resume text", metadata: { creditsUsed: 5 } };
+    const { exit } = await run([page], (f) => f.scrapeMarkdown("https://example.com/cv"));
+    expect(successOf(exit).usage).toEqual({ via: "cloud", credits: 5 });
   });
 
   test.each<ScrapedPage>([{}, { markdown: "" }, { markdown: "  \n" }])(
@@ -96,12 +108,12 @@ describe("scrapeJob", () => {
     const url = "https://example.com/job";
     const page = { markdown: "# Engineer", rawHtml: "<html></html>" };
     const { exit, calls } = await run([page], (f) => f.scrapeJob(url));
-    expect(successOf(exit)).toEqual(page);
+    expect(successOf(exit)).toEqual({ ...page, usage: cloudUsage });
     expect(calls.map(({ request }) => request)).toEqual([
       {
         formats: ["markdown", "rawHtml"],
-        onlyMainContent: true,
         excludeTags: ["nav", "header", "footer", "aside", "form", "script", "style"],
+        proxy: "basic",
       },
     ]);
   });
@@ -110,7 +122,7 @@ describe("scrapeJob", () => {
     const missing = await run([{ rawHtml: "<html>" }], (f) => f.scrapeJob("https://e.com/j"));
     expect(failureOf(missing.exit)._tag).toBe("ScrapeFailed");
     const bare = await run([{ markdown: "Job" }], (f) => f.scrapeJob("https://e.com/j"));
-    expect(successOf(bare.exit)).toEqual({ markdown: "Job", rawHtml: null });
+    expect(successOf(bare.exit)).toEqual({ markdown: "Job", rawHtml: null, usage: cloudUsage });
   });
 });
 
@@ -130,11 +142,12 @@ describe("scrapeListingPage", () => {
       links: ["https://acme.com/jobs/1"],
       rawHtml: null,
       siteName: "Acme",
+      usage: cloudUsage,
     });
     expect(calls[0]?.request).toEqual({
       formats: ["markdown", "links"],
-      onlyMainContent: true,
       excludeTags: chrome,
+      proxy: "basic",
     });
   });
 
@@ -146,9 +159,9 @@ describe("scrapeListingPage", () => {
     expect(successOf(exit)).toMatchObject({ rawHtml: "<html></html>", links: [] });
     expect(calls[0]?.request).toEqual({
       formats: ["markdown", "links", "rawHtml"],
-      onlyMainContent: true,
       excludeTags: chrome,
       includeTags: ["#openings"],
+      proxy: "basic",
     });
   });
 
@@ -178,7 +191,7 @@ describe("rate limiting", () => {
     const { exit, calls } = await run([rateLimited(), { markdown: "Job text" }], (f) =>
       f.scrapeMarkdown("https://example.com/job"),
     );
-    expect(successOf(exit)).toBe("Job text");
+    expect(successOf(exit).markdown).toBe("Job text");
     expect(startTimes(calls)).toEqual([0, 34_000]);
   });
 
@@ -203,6 +216,27 @@ describe("rate limiting", () => {
     expect(error._tag).toBe("FirecrawlBlocked");
     expect(error.status).toBe(429);
     expect(startTimes(calls)).toEqual([0, 34_000, 68_000, 102_000]);
+  });
+
+  test("spaces a local instance's requests 2 seconds apart per site", async () => {
+    const fake = fakeScrape([{ markdown: "Job text" }]);
+    const urls = ["https://a.com/1", "https://b.com/1", "https://a.com/2", "https://a.com/3"];
+    const calls = await Effect.gen(function* () {
+      const local = makeBackend("local", fake, yield* localLimiter);
+      const firecrawl = makeScrapeRouter({ mode: "local", local });
+      const fiber = yield* Effect.forkChild(
+        Effect.forEach(urls, firecrawl.scrapeMarkdown, { concurrency: "unbounded" }),
+      );
+      yield* TestClock.adjust("1 minute");
+      yield* Fiber.join(fiber);
+      return fake.calls;
+    }).pipe(Effect.provide(TestClock.layer()), Effect.runPromise);
+    expect(calls.map(({ url, at }) => [url, at - (calls[0]?.at ?? 0)])).toEqual([
+      ["https://a.com/1", 0],
+      ["https://b.com/1", 0],
+      ["https://a.com/2", 2_000],
+      ["https://a.com/3", 4_000],
+    ]);
   });
 });
 
@@ -250,7 +284,10 @@ describe("map", () => {
           { concurrency: "unbounded" },
         ),
     );
-    expect(successOf(exit)[1]).toEqual([{ url: "https://acme.com/jobs/1" }]);
+    expect(successOf(exit)[1]).toEqual({
+      links: [{ url: "https://acme.com/jobs/1" }],
+      usage: cloudUsage,
+    });
     expect(calls[1]?.request).toEqual({ search: "job", limit: 50 });
     expect(startTimes(calls)).toEqual([0, 6_100]);
   });
@@ -263,23 +300,29 @@ describe("map", () => {
   });
 });
 
-describe("live layer", () => {
-  test("passes the request to the SDK with PDF parsing off", async () => {
+describe("SDK client", () => {
+  test("asks for the main content without ads, inline images or PDF parsing", async () => {
     // The overloads type the reply of a scrape with a JSON format, which this one has not.
     const scrape = spyOn(FirecrawlClient.prototype, "scrape").mockResolvedValue({
       markdown: "# Jobs",
       links: [],
     } as never);
     try {
-      const page = await Firecrawl.use((f) =>
-        f.scrapeListingPage("https://acme.com/careers", { selector: "main" }),
-      ).pipe(Effect.provide(firecrawlLayer("test-key")), Effect.runPromise);
+      const page = await sdkClient({ apiKey: "test-key" })
+        .scrape("https://acme.com/careers", {
+          formats: ["markdown", "links"],
+          includeTags: ["main"],
+          proxy: "auto",
+        })
+        .pipe(Effect.runPromise);
       expect(page.markdown).toBe("# Jobs");
       expect(scrape).toHaveBeenCalledWith("https://acme.com/careers", {
         formats: ["markdown", "links"],
-        onlyMainContent: true,
-        excludeTags: ["nav", "header", "footer", "aside", "form", "script", "style"],
         includeTags: ["main"],
+        proxy: "auto",
+        onlyMainContent: true,
+        blockAds: true,
+        removeBase64Images: true,
         parsers: [],
       });
     } finally {
@@ -292,10 +335,10 @@ describe("live layer", () => {
       links: [{ url: "https://acme.com/jobs/1", title: "Engineer" }],
     });
     try {
-      const links = await Firecrawl.use((f) =>
-        f.map("https://acme.com", { search: "job", limit: 200 }),
-      ).pipe(Effect.provide(firecrawlLayer("test-key")), Effect.runPromise);
-      expect(links).toEqual([{ url: "https://acme.com/jobs/1", title: "Engineer" }]);
+      const result = await sdkClient({ apiKey: "", apiUrl: "http://localhost:3002" })
+        .map("https://acme.com", { search: "job", limit: 200 })
+        .pipe(Effect.runPromise);
+      expect(result.links).toEqual([{ url: "https://acme.com/jobs/1", title: "Engineer" }]);
       expect(map).toHaveBeenCalledWith("https://acme.com", { search: "job", limit: 200 });
     } finally {
       map.mockRestore();

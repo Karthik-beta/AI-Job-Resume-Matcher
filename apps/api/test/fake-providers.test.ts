@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Effect, Layer } from "effect";
+import { Firecrawl } from "../src/matching/firecrawl";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PrismaService } from "../src/prisma/prisma.service";
 import {
   fakeEvaluator,
+  fakeFirecrawlLayer,
   fakeHttpFetch,
   fakeNotifier,
   fakePdfParser,
@@ -57,6 +59,22 @@ describe("fake providers", () => {
   it("stops the run on a scripted Firecrawl 429", async () => {
     const run = await runOver("https://board.example.com/jobs?fake-error=429");
     expect(run).toMatchObject({ status: "STOPPED", stopReason: "Scripted Firecrawl error 429." });
+  });
+
+  it.each(["local", "hybrid"] as const)("serves the fixtures in %p mode", async (mode) => {
+    const scrape = (url: string) =>
+      Firecrawl.use((firecrawl) => firecrawl.scrapeJob(url)).pipe(
+        Effect.provide(fakeFirecrawlLayer(mode)),
+        Effect.result,
+        Effect.runPromise,
+      );
+    const page = await scrape("https://jobs.example.com/backend-payments");
+    expect(page).toMatchObject({ _tag: "Success", success: { usage: { via: "local" } } });
+    // A local instance has no credits to run out of, so its errors fail just the page; hybrid
+    // retries the page on the cloud, whose 429 stops the run.
+    const failed = await scrape("https://jobs.example.com/x?fake-error=429");
+    const tag = mode === "local" ? "ScrapeFailed" : "FirecrawlBlocked";
+    expect(failed).toMatchObject({ _tag: "Failure", failure: { _tag: tag } });
   });
 
   it("blocks requests to real providers", async () => {

@@ -119,7 +119,7 @@ const scrapePages = (source: ListingSource) =>
 const mapListings = (source: ListingSource) =>
   Effect.gen(function* () {
     const firecrawl = yield* Firecrawl;
-    const links = yield* firecrawl.map(source.url, { search: "job", limit: mapLimit });
+    const { links } = yield* firecrawl.map(source.url, { search: "job", limit: mapLimit });
     const company = hostName(source.url);
     const byUrl = new Map<string, Listing>();
     for (const link of links) {

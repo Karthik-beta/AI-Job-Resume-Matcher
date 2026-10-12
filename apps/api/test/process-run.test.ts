@@ -15,6 +15,7 @@ import { ListingExtractor } from "../src/matching/listing-extractor";
 import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
+import { LocalFirecrawlDown, ScrapeHealth } from "../src/matching/scrape-router";
 import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
 import { TitleTriage } from "../src/matching/triage";
 import { PrismaService } from "../src/prisma/prisma.service";
@@ -92,6 +93,7 @@ describe("process run", () => {
     options: {
       verdicts?: Record<string, Verdict>;
       preflight?: Effect.Effect<void, ModelUnsupported>;
+      scrapeHealth?: Effect.Effect<void, LocalFirecrawlDown>;
       failAlerts?: boolean;
       resumeHash?: string;
       // Scores by job title (3 when missing), or the error the triage request fails with.
@@ -126,7 +128,11 @@ describe("process run", () => {
       scrapeJob: (url) =>
         Effect.sync(() => {
           scraped.push(url);
-          return { markdown: `Page ${url}`, rawHtml: jobHtml[url] ?? null };
+          return {
+            markdown: `Page ${url}`,
+            rawHtml: jobHtml[url] ?? null,
+            usage: { via: "cloud", credits: 1 } as const,
+          };
         }),
       scrapeListingPage: (url, options) =>
         Effect.sync(() => {
@@ -139,6 +145,7 @@ describe("process run", () => {
             links: [...jobs, ...embed],
             rawHtml: null,
             siteName: null,
+            usage: { via: "cloud", credits: 1 } as const,
           };
         }),
       map: () => Effect.die("unused"),
@@ -181,6 +188,7 @@ describe("process run", () => {
       Layer.succeed(HttpFetch, fakeHttpFetch),
       Layer.succeed(PdfParser, fakePdfParser),
       Layer.effect(HostLimiter, makeHostLimiter(0)),
+      Layer.succeed(ScrapeHealth, ScrapeHealth.of({ check: options.scrapeHealth ?? Effect.void })),
     );
     await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
@@ -283,6 +291,16 @@ describe("process run", () => {
 
     expect(scraped).toEqual([]);
     expect(run).toMatchObject({ status: "STOPPED", stopReason: "Unsupported model", found: 0 });
+  });
+
+  it("stops before scraping when the local Firecrawl is down", async () => {
+    const message = "Local Firecrawl is not running at http://localhost:3002";
+    const { run, scraped } = await runWith(await startRun(), {
+      scrapeHealth: Effect.fail(new LocalFirecrawlDown({ message })),
+    });
+
+    expect(scraped).toEqual([]);
+    expect(run).toMatchObject({ status: "STOPPED", stopReason: message, found: 0 });
   });
 
   it("keeps an applied match's status and stores the listing details", async () => {

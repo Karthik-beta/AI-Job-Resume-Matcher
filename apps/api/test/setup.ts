@@ -2,6 +2,8 @@
 // covers the Firecrawl SDK (it uses axios, not fetch); any fetch to a provider fails loudly.
 delete process.env["FIRECRAWL_API_KEY"];
 delete process.env["OPENROUTER_API_KEY"];
+// The fake Firecrawl follows FIRECRAWL_MODE; tests pick a mode explicitly where it matters.
+delete process.env["FIRECRAWL_MODE"];
 process.env["PROVIDERS"] = "fake";
 
 // The ATS hosts serve the public job board APIs the source adapters read.

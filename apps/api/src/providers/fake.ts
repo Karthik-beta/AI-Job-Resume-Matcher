@@ -10,10 +10,25 @@ import {
   ScrapeFailed,
 } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
-import { Firecrawl, Listing } from "../matching/firecrawl";
+import {
+  Firecrawl,
+  FirecrawlRequestFailed,
+  Listing,
+  type ScrapeBackend,
+  type ScrapeRequest,
+  type Via,
+} from "../matching/firecrawl";
 import { ListingExtractor } from "../matching/listing-extractor";
 import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
+import {
+  type FirecrawlMode,
+  firecrawlModeFrom,
+  healthyScrapes,
+  makeScrapeRouter,
+  type RouterConfig,
+  ScrapeHealth,
+} from "../matching/scrape-router";
 import { hostLimiterLayer } from "../matching/sources/http";
 import { markdownLinks } from "../matching/sources/page-links";
 import { TitleTriage } from "../matching/triage";
@@ -29,6 +44,7 @@ const readFixture = (path: string) =>
   });
 
 // `?fake-error=429` (or 401, 402) blocks Firecrawl; any other status fails just that scrape.
+// Firecrawl scrapes script the same errors, through the router's mapping (see fixturePage).
 const scriptedError = (url: string): Effect.Effect<void, FirecrawlBlocked | ScrapeFailed> => {
   if (!URL.canParse(url))
     return Effect.fail(new ScrapeFailed({ status: null, message: "Invalid URL." }));
@@ -45,29 +61,52 @@ const pagePath = (url: string) => {
   return hostname === jobsHost ? `jobs${pathname}.md` : "resume.md";
 };
 
-export const fakeFirecrawl = Firecrawl.of({
-  scrapeMarkdown: (url) =>
-    scriptedError(url).pipe(Effect.andThen(Effect.suspend(() => readFixture(pagePath(url))))),
-  // The fixture job pages have no structured data.
-  scrapeJob: (url) =>
-    scriptedError(url).pipe(
-      Effect.andThen(Effect.suspend(() => readFixture(pagePath(url)))),
-      Effect.map((markdown) => ({ markdown, rawHtml: null })),
-    ),
-  // Every careers page serves the same board, whose links the fake extractor reads.
-  scrapeListingPage: (url) =>
-    scriptedError(url).pipe(
-      Effect.andThen(readFixture("listing-page.md")),
-      Effect.map((markdown) => ({
-        markdown,
-        links: markdownLinks(markdown).map((link) => link.url),
-        rawHtml: null,
-        siteName: null,
-      })),
-    ),
-  // No map has job links, so sources that use one fall back to their page.
-  map: (url) => scriptedError(url).pipe(Effect.as([])),
+// The fixture page for a scrape: careers pages (asked for links) all serve the same board,
+// whose links the fake extractor reads. The fixture job pages have no structured data.
+const fixturePage = (url: string, request: ScrapeRequest) =>
+  Effect.gen(function* () {
+    if (!URL.canParse(url)) {
+      return yield* new FirecrawlRequestFailed({ status: null, message: "Invalid URL." });
+    }
+    const status = Number(new URL(url).searchParams.get("fake-error"));
+    if (status) {
+      return yield* new FirecrawlRequestFailed({
+        status,
+        message: `Scripted Firecrawl error ${status}.`,
+      });
+    }
+    const listing = request.formats.includes("links");
+    const markdown = yield* readFixture(listing ? "listing-page.md" : pagePath(url)).pipe(
+      Effect.mapError((error) => new FirecrawlRequestFailed(error)),
+    );
+    return { markdown, links: listing ? markdownLinks(markdown).map((link) => link.url) : [] };
+  });
+
+// Both instances serve the fixtures. No map has job links, so sources that use one fall
+// back to their page.
+const fakeBackend = (via: Via): ScrapeBackend => ({
+  via,
+  scrape: fixturePage,
+  map: (url) => fixturePage(url, { formats: [] }).pipe(Effect.as({ links: [] })),
 });
+
+const fakeRouterConfig = (mode: FirecrawlMode): RouterConfig => {
+  switch (mode) {
+    case "cloud":
+      return { mode, cloud: fakeBackend("cloud"), cloudProxy: "basic" };
+    case "local":
+      return { mode, local: fakeBackend("local") };
+    case "hybrid":
+      return { mode, cloud: fakeBackend("cloud"), local: fakeBackend("local") };
+  }
+};
+
+// FIRECRAWL_MODE picks the fake instances, so each mode can be tried without Firecrawl.
+export const fakeFirecrawlLayer = (mode: FirecrawlMode) =>
+  Layer.mergeAll(
+    Layer.succeed(Firecrawl, makeScrapeRouter(fakeRouterConfig(mode))),
+    Layer.succeed(ScrapeHealth, healthyScrapes),
+  );
 
 // The listings in listings.json, which name the fixture board's job pages.
 export const fakeListingExtractor = ListingExtractor.of({
@@ -136,7 +175,7 @@ export const fakeNotifier = Notifier.of({
 });
 
 export const fakeProvidersLayer = Layer.mergeAll(
-  Layer.succeed(Firecrawl, fakeFirecrawl),
+  fakeFirecrawlLayer(firecrawlModeFrom(process.env)),
   Layer.succeed(ResumeSource, fakeResumeSource),
   Layer.succeed(HttpFetch, fakeHttpFetch),
   Layer.succeed(PdfParser, fakePdfParser),
