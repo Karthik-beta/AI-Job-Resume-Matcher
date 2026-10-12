@@ -93,6 +93,13 @@ describe("parseJobPosting", () => {
     );
   });
 
+  test("reads a validThrough time without an offset as UTC", () => {
+    const html = script({ "@type": "JobPosting", validThrough: "2026-09-30T12:00:00" });
+    expect(parseJobPosting(html)?.validThrough).toBe("2026-09-30T12:00:00.000Z");
+    const offset = script({ "@type": "JobPosting", validThrough: "2026-09-30T12:00:00+05:30" });
+    expect(parseJobPosting(offset)?.validThrough).toBe("2026-09-30T06:30:00.000Z");
+  });
+
   test("reads a posting from an array and its experience text", () => {
     const html = script([
       { "@type": "WebPage" },

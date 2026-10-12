@@ -523,6 +523,48 @@ describe("process run", () => {
     }
   });
 
+  it("checks jobs triage rejected once triage is turned off", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 3, "Job 3": 0, "Job 4": 3, "Job 5": 3 };
+    const first = await runWith(await startRun(), { triage });
+    expect(first.evaluated).not.toContain(jobUrl("3"));
+
+    await prisma.settings.update({ where: { userId }, data: { triageEnabled: false } });
+    try {
+      const { evaluated, triaged } = await runWith(await startRun(), {});
+      expect(triaged).toEqual([]);
+      expect(evaluated).toContain(jobUrl("3"));
+      const result = await prisma.jobResult.findFirstOrThrow({
+        where: { userId, jobUrl: jobUrl("3") },
+      });
+      expect(result).toMatchObject({ skipped: null, isMatch: false, error: null });
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { triageEnabled: true } });
+    }
+  });
+
+  it("updates a match saved under another spelling of the job's URL", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.match.deleteMany({ where: { userId, jobUrl: jobUrl("4") } });
+    const oldUrl = "https://Jobs.example.com/4/?utm_source=feed";
+    await prisma.match.create({
+      data: {
+        userId,
+        jobUrl: oldUrl,
+        title: "Job 4",
+        company: "Example",
+        reason: "Old",
+        status: "APPLIED",
+      },
+    });
+    await runWith(await startRun(), { verdicts: { [jobUrl("4")]: "match" } });
+
+    const matches = await prisma.match.findMany({
+      where: { userId, jobUrl: { in: [oldUrl, jobUrl("4")] } },
+    });
+    expect(matches).toMatchObject([{ jobUrl: oldUrl, status: "APPLIED", reason: "Strong fit" }]);
+  });
+
   it("ignores a run that is no longer queued", async () => {
     const runId = await startRun();
     await prisma.run.update({ where: { id: runId }, data: { status: "STOPPED" } });
