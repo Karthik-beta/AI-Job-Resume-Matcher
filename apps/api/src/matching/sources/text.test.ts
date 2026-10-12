@@ -33,6 +33,10 @@ describe("experienceFromText", () => {
     ["8-5 years, then 3+ years", 3, null],
     ["Experience with Go", null, null],
     ["We have been around for 10 years", null, null],
+    ["Founded 2019-20 years ago", null, null],
+    ["Over 100+ years of history", null, null],
+    ["45-50 years, then 3+ years", 3, null],
+    ["At least 50 years", null, null],
   ])("reads %p", (text, min, max) => {
     expect(experienceFromText(text)).toEqual({
       experienceMinYears: min,

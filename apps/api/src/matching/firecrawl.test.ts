@@ -91,6 +91,29 @@ describe("scrapeMarkdown", () => {
   );
 });
 
+describe("scrapeJob", () => {
+  test("returns the main content with the page's HTML", async () => {
+    const url = "https://example.com/job";
+    const page = { markdown: "# Engineer", rawHtml: "<html></html>" };
+    const { exit, calls } = await run([page], (f) => f.scrapeJob(url));
+    expect(successOf(exit)).toEqual(page);
+    expect(calls.map(({ request }) => request)).toEqual([
+      {
+        formats: ["markdown", "rawHtml"],
+        onlyMainContent: true,
+        excludeTags: ["nav", "header", "footer", "aside", "form", "script", "style"],
+      },
+    ]);
+  });
+
+  test("fails without markdown and tolerates missing HTML", async () => {
+    const missing = await run([{ rawHtml: "<html>" }], (f) => f.scrapeJob("https://e.com/j"));
+    expect(failureOf(missing.exit)._tag).toBe("ScrapeFailed");
+    const bare = await run([{ markdown: "Job" }], (f) => f.scrapeJob("https://e.com/j"));
+    expect(successOf(bare.exit)).toEqual({ markdown: "Job", rawHtml: null });
+  });
+});
+
 describe("scrapeListingPage", () => {
   const url = "https://acme.com/careers";
   const chrome = ["nav", "header", "footer", "aside", "form", "script", "style"];

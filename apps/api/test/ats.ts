@@ -38,6 +38,7 @@ export const fakeHttp = (replies: Record<string, Reply>) => {
 
 const unusedFirecrawl = Firecrawl.of({
   scrapeMarkdown: () => Effect.die("Firecrawl is not used by ATS adapters"),
+  scrapeJob: () => Effect.die("Firecrawl is not used by ATS adapters"),
   scrapeListingPage: () => Effect.die("Firecrawl is not used by ATS adapters"),
   map: () => Effect.die("Firecrawl is not used by ATS adapters"),
 });

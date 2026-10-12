@@ -16,6 +16,7 @@ import { PdfParser } from "../matching/pdf";
 import { ResumeSource, sha256 } from "../matching/resume-source";
 import { hostLimiterLayer } from "../matching/sources/http";
 import { markdownLinks } from "../matching/sources/page-links";
+import { TitleTriage } from "../matching/triage";
 
 const fixtures = new URL("../../test/fixtures/", import.meta.url);
 const jobsHost = "jobs.example.com";
@@ -47,6 +48,12 @@ const pagePath = (url: string) => {
 export const fakeFirecrawl = Firecrawl.of({
   scrapeMarkdown: (url) =>
     scriptedError(url).pipe(Effect.andThen(Effect.suspend(() => readFixture(pagePath(url))))),
+  // The fixture job pages have no structured data.
+  scrapeJob: (url) =>
+    scriptedError(url).pipe(
+      Effect.andThen(Effect.suspend(() => readFixture(pagePath(url)))),
+      Effect.map((markdown) => ({ markdown, rawHtml: null })),
+    ),
   // Every careers page serves the same board, whose links the fake extractor reads.
   scrapeListingPage: (url) =>
     scriptedError(url).pipe(
@@ -116,6 +123,11 @@ export const fakeEvaluator = MatchEvaluator.of({
   },
 });
 
+// Every title is a strong fit, so triage keeps every job in listing order.
+export const fakeTitleTriage = TitleTriage.of({
+  score: ({ jobs }) => Effect.succeed(jobs.map(({ id }) => ({ id, score: 3, reason: null }))),
+});
+
 export const fakeNotifier = Notifier.of({
   notifyMatch: (webhookUrl, alert) =>
     isDiscordWebhookUrl(webhookUrl)
@@ -129,6 +141,7 @@ export const fakeProvidersLayer = Layer.mergeAll(
   Layer.succeed(HttpFetch, fakeHttpFetch),
   Layer.succeed(PdfParser, fakePdfParser),
   Layer.succeed(MatchEvaluator, fakeEvaluator),
+  Layer.succeed(TitleTriage, fakeTitleTriage),
   Layer.succeed(ListingExtractor, fakeListingExtractor),
   Layer.succeed(Notifier, fakeNotifier),
   hostLimiterLayer,

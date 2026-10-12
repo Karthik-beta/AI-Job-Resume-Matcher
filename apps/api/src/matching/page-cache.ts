@@ -3,6 +3,7 @@ import { Clock, Context, Duration, Effect, Layer, Option, Schema } from "effect"
 import type { CacheKind, Prisma, PrismaClient } from "../generated/prisma/client";
 import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
+import { JobPage, parseJobPosting } from "./job-posting";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
 import { type ListingSource, listingPage } from "./sources/adapter";
 import type { DetectedSource } from "./sources/detect";
@@ -79,7 +80,12 @@ const cached = <A extends Prisma.InputJsonValue, E, R>(
     return value;
   });
 
-const decodeMarkdown = Schema.decodeUnknownOption(Schema.String);
+// Job pages cached before their structured data was read hold only the markdown.
+const decodeCachedJobPage = Schema.decodeUnknownOption(Schema.Union([JobPage, Schema.String]));
+const decodeJobPage = (content: unknown): Option.Option<JobPage> =>
+  decodeCachedJobPage(content).pipe(
+    Option.map((page) => (typeof page === "string" ? { markdown: page, posting: null } : page)),
+  );
 const decodeListings = Schema.decodeUnknownOption(Schema.Array(Listing));
 
 // A PDF job ad is parsed here, as Firecrawl bills a PDF per page. A failed HEAD or download,
@@ -102,13 +108,23 @@ const downloadPdf = (url: string) =>
 const fetchJobPage = (url: string) =>
   Effect.gen(function* () {
     const pdf = yield* downloadPdf(url);
-    if (pdf) return yield* (yield* PdfParser).parse(pdf);
+    if (pdf) return { markdown: yield* (yield* PdfParser).parse(pdf), posting: null };
     const firecrawl = yield* Firecrawl;
-    return yield* firecrawl.scrapeMarkdown(url).pipe(Effect.flatMap(pdfOrMarkdown));
+    const { markdown, rawHtml } = yield* firecrawl.scrapeJob(url);
+    return {
+      markdown: yield* pdfOrMarkdown(markdown),
+      posting: rawHtml ? parseJobPosting(rawHtml) : null,
+    };
   });
 
+const cachedJobPage = <E, R>(
+  userId: string,
+  url: string,
+  read: () => Effect.Effect<JobPage, E, R>,
+) => cached({ userId, url, kind: "JOB_PAGE" }, decodeJobPage, null, read);
+
 export const scrapeJobPage = (userId: string, url: string) =>
-  cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, () => fetchJobPage(url));
+  cachedJobPage(userId, url, () => fetchJobPage(url));
 
 // Keyed by the source URL; changing a source's kind clears its row (see SourcesService.update).
 // Only the listings are cached; an embedded board and the listing hash are reported by the
@@ -144,10 +160,14 @@ const withDescription = (listing: Listing, description: string) =>
 // ad when it can, and the page is scraped as a last resort; both are cached like job pages.
 export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =>
   Effect.gen(function* () {
-    if (listing.description !== undefined) return withDescription(listing, listing.description);
+    if (listing.description !== undefined) {
+      return { markdown: withDescription(listing, listing.description), posting: null };
+    }
     const { fetchDescription } = adapterFor(kind);
     if (!fetchDescription) return yield* scrapeJobPage(userId, listing.url);
-    return yield* cached({ userId, url: listing.url, kind: "JOB_PAGE" }, decodeMarkdown, null, () =>
-      fetchDescription(listing).pipe(Effect.map((text) => withDescription(listing, text))),
+    return yield* cachedJobPage(userId, listing.url, () =>
+      fetchDescription(listing).pipe(
+        Effect.map((text) => ({ markdown: withDescription(listing, text), posting: null })),
+      ),
     );
   });

@@ -19,7 +19,13 @@ model Settings {
   targetMaxYears    Float?
   locations         String[]
   includeUnknown    Boolean  @default(true)
+  // Job titles must contain one of these words or phrases (none = any title).
+  titleInclude      String[] @default([])
+  // Job titles must not contain any of these.
+  titleExclude      String[] @default([])
   maxJobsPerRun     Int      @default(5) // 1-20
+  // Rank job titles against the resume before reading job pages.
+  triageEnabled     Boolean  @default(true)
   scheduleMinutes   Int? // null = no scheduled checks
 }
 
@@ -86,10 +92,15 @@ model Run {
   @@index([userId, createdAt])
 }
 
+enum SkipReason {
+  EXPIRED // the job page's structured data says the posting has closed
+  TRIAGE // title triage ranked it below the threshold
+}
+
 model JobResult {
-  id          String   @id @default(uuid(7))
+  id          String      @id @default(uuid(7))
   runId       String
-  run         Run      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  run         Run         @relation(fields: [runId], references: [id], onDelete: Cascade)
   userId      String
   contextKey  String
   jobUrl      String
@@ -98,11 +109,12 @@ model JobResult {
   locations   String[]
   expMinYears Float?
   expMaxYears Float?
-  isMatch     Boolean? // null when the job errored
+  isMatch     Boolean? // null when the job errored or was skipped
   reason      String?
   error       String?
-  matchSaved  Boolean  @default(false)
-  createdAt   DateTime @default(now())
+  skipped     SkipReason? // set when the job was settled without an evaluation
+  matchSaved  Boolean     @default(false)
+  createdAt   DateTime    @default(now())
 
   @@unique([userId, contextKey, jobUrl])
 }

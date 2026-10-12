@@ -40,19 +40,25 @@ export const htmlToText = (html: string) =>
     .replace(/[ \t\xa0]+/g, " ")
     .replace(/ *\n */g, "\n")
     .replace(/\n{3,}/g, "\n\n")
+    // A list item that wraps its text in a paragraph.
+    .replace(/\n-\n+/g, "\n- ")
     .replace(/\n+- /g, "\n- ")
     .trim();
 
 const years = "(?:years?|yrs?)";
+// A word boundary before each number keeps "2019-20 years" and "100+ years" from reading as
+// 19-20 and 0+.
 const rangePattern = new RegExp(
-  String.raw`(\d{1,2})\+?\s*(?:-|–|—|to)\s*(\d{1,2})\+?\s*${years}`,
+  String.raw`\b(\d{1,2})\+?\s*(?:-|–|—|to)\s*\b(\d{1,2})\+?\s*${years}`,
   "i",
 );
 const atLeastPattern = new RegExp(
-  String.raw`(?:at least|minimum(?: of)?|min\.?)\s*(\d{1,2})\+?\s*${years}`,
+  String.raw`(?:at least|minimum(?: of)?|min\.?)\s*\b(\d{1,2})\+?\s*${years}`,
   "i",
 );
-const plusPattern = new RegExp(String.raw`(\d{1,2})\s*\+\s*${years}`, "i");
+const plusPattern = new RegExp(String.raw`\b(\d{1,2})\s*\+\s*${years}`, "i");
+// More years than this is a company's age or a typo, not a requirement.
+const maxYears = 40;
 
 export interface ExperienceBounds {
   readonly experienceMinYears: number | null;
@@ -67,10 +73,11 @@ export const experienceFromText = (text: string): ExperienceBounds => {
   if (range) {
     const min = Number(range[1]);
     const max = Number(range[2]);
-    if (min <= max) return { experienceMinYears: min, experienceMaxYears: max };
+    if (min <= max && max <= maxYears) return { experienceMinYears: min, experienceMaxYears: max };
   }
   const atLeast = atLeastPattern.exec(text) ?? plusPattern.exec(text);
-  if (atLeast) return { experienceMinYears: Number(atLeast[1]), experienceMaxYears: null };
+  const min = Number(atLeast?.[1]);
+  if (atLeast && min <= maxYears) return { experienceMinYears: min, experienceMaxYears: null };
   return unknownExperience;
 };
 

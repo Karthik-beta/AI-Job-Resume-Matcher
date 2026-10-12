@@ -182,6 +182,11 @@ describe("nextPageUrl", () => {
     ],
     ["[More](/careers?offset=20)", source, "https://acme.com/careers?offset=20"],
     ["[2](/careers/page/2/)", source, "https://acme.com/careers/page/2"],
+    [
+      "[1](/careers?page=1) [2](/careers?page=2) [3](/careers?page=3)",
+      source,
+      "https://acme.com/careers?page=2",
+    ],
   ])("follows %p from %p", (markdown, page, next) => {
     expect(nextPageUrl(markdown, page, source)).toBe(next);
   });

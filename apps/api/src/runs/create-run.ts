@@ -1,6 +1,6 @@
 import type { PrismaClient, Run, RunTrigger } from "../generated/prisma/client";
 import { contextKey } from "../matching/context-key";
-import { requirementsOf } from "./run-settings";
+import { requirementsOf, titleFiltersOf } from "./run-settings";
 
 export type CreateRunResult =
   | { readonly _tag: "Created"; readonly run: Run }
@@ -45,6 +45,7 @@ export const createRun = (
           sourceIds: ids,
           model,
           requirements: requirementsOf(settings),
+          titleFilters: titleFiltersOf(settings),
         }),
       },
     });

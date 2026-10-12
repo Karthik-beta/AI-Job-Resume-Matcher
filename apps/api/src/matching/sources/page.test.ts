@@ -50,6 +50,7 @@ const fetchPage = async (
   const maps: string[] = [];
   const firecrawl = Firecrawl.of({
     scrapeMarkdown: () => Effect.die("unused"),
+    scrapeJob: () => Effect.die("unused"),
     scrapeListingPage: (url, { selector = null, withHtml = false } = {}) =>
       Effect.sync(() => {
         scrapes.push({ url, selector, withHtml });
@@ -306,6 +307,14 @@ describe("page adapter with Firecrawl's map", () => {
     );
     expect(maps).toEqual([`${url} job`]);
     expect(scrapes).toEqual([]);
+    expect(result).toMatchObject({
+      success: {
+        listingHash: listingHashOf(
+          "https://careers.acme.com/jobs/data_engineer " +
+            "https://www.acme.com/jobs/senior-backend-engineer-123456",
+        ),
+      },
+    });
     expect(listingsOf(result)).toEqual([
       job({
         title: "Senior Backend Engineer",

@@ -7,6 +7,7 @@ import {
   ModelUnsupported,
   NotifyFailed,
   OpenRouterAuthError,
+  OpenRouterRequestFailed,
 } from "../src/matching/errors";
 import { MatchEvaluator, type MatchInput } from "../src/matching/evaluate";
 import { Firecrawl, type Listing } from "../src/matching/firecrawl";
@@ -15,6 +16,7 @@ import { pageCacheStoreLayer } from "../src/matching/page-cache";
 import { PdfParser } from "../src/matching/pdf";
 import { ResumeSource } from "../src/matching/resume-source";
 import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
+import { TitleTriage } from "../src/matching/triage";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
@@ -35,7 +37,15 @@ const sourceB = "https://board.example.com/b";
 const sourceC = "https://board.example.com/c";
 const listings: Record<string, Listing[]> = {
   [sourceA]: [listing("1", ["Bengaluru"]), listing("2", ["Mumbai"]), listing("3")],
-  [sourceB]: [listing("1", ["Bengaluru"], "Duplicate"), listing("4", ["Bengaluru"]), listing("5")],
+  // Each of the first three repeats a job from source A: by URL, by canonical URL, and by
+  // company, title and location.
+  [sourceB]: [
+    listing("1", ["Bengaluru"], "Duplicate"),
+    listing("2/?utm_source=feed#apply", ["Mumbai"], "Also duplicate"),
+    listing("10", ["bengaluru"], "Job 1"),
+    listing("4", ["Bengaluru"]),
+    listing("5"),
+  ],
   [sourceC]: [
     {
       ...listing("6", ["Bengaluru"], "Described"),
@@ -43,6 +53,23 @@ const listings: Record<string, Listing[]> = {
       description: "Build payment APIs.",
     },
   ],
+};
+
+const sourceD = "https://board.example.com/d";
+listings[sourceD] = [listing("7"), listing("8"), listing("9")];
+
+const jsonLd = (posting: object) =>
+  `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", ...posting })}</script>`;
+const mumbai = { "@type": "Place", address: { addressLocality: "Mumbai" } };
+const bengaluru = { "@type": "Place", address: { addressLocality: "Bengaluru" } };
+// Job pages with schema.org JobPosting data.
+const jobHtml: Record<string, string> = {
+  "https://jobs.example.com/7": jsonLd({ validThrough: "2020-01-31", jobLocation: bengaluru }),
+  "https://jobs.example.com/8": jsonLd({ jobLocation: mumbai, description: "<p>Ad</p>" }),
+  "https://jobs.example.com/9": jsonLd({
+    jobLocation: bengaluru,
+    description: "<p>Build APIs.</p>",
+  }),
 };
 
 type Verdict = "match" | "no match" | "invalid" | "auth";
@@ -67,8 +94,21 @@ describe("process run", () => {
       preflight?: Effect.Effect<void, ModelUnsupported>;
       failAlerts?: boolean;
       resumeHash?: string;
+      // Scores by job title (3 when missing), or the error the triage request fails with.
+      triage?: Record<string, number> | OpenRouterRequestFailed | OpenRouterAuthError;
     },
   ) => {
+    const triaged: string[][] = [];
+    const triage = TitleTriage.of({
+      score: ({ jobs }) => {
+        triaged.push(jobs.map(({ title }) => title));
+        const scripted = options.triage ?? {};
+        if (scripted instanceof Error) return Effect.fail(scripted);
+        return Effect.succeed(
+          jobs.map(({ id, title }) => ({ id, score: scripted[title] ?? 3, reason: null })),
+        );
+      },
+    });
     const evaluated: string[] = [];
     const resumeHashes = new Set<string | undefined>();
     const scraped: string[] = [];
@@ -82,10 +122,11 @@ describe("process run", () => {
             }),
     });
     const firecrawl = Firecrawl.of({
-      scrapeMarkdown: (url) =>
+      scrapeMarkdown: () => Effect.die("unused"),
+      scrapeJob: (url) =>
         Effect.sync(() => {
           scraped.push(url);
-          return `Page ${url}`;
+          return { markdown: `Page ${url}`, rawHtml: jobHtml[url] ?? null };
         }),
       scrapeListingPage: (url, options) =>
         Effect.sync(() => {
@@ -130,6 +171,7 @@ describe("process run", () => {
       ),
       pageCacheStoreLayer(prisma),
       Layer.succeed(Notifier, notifier),
+      Layer.succeed(TitleTriage, triage),
       Layer.succeed(
         ResumeSource,
         ResumeSource.of({
@@ -142,7 +184,7 @@ describe("process run", () => {
     );
     await Effect.runPromise(processRun(prisma, runId, "test/model").pipe(Effect.provide(layer)));
     const run = await prisma.run.findUniqueOrThrow({ where: { id: runId } });
-    return { run, evaluated, scraped, alerts, resumeHashes };
+    return { run, evaluated, scraped, alerts, resumeHashes, triaged };
   };
 
   const jobUrl = (id: string) => `https://jobs.example.com/${id}`;
@@ -330,6 +372,179 @@ describe("process run", () => {
     // The first check of a page source records the board it embeds.
     const checked = await prisma.jobSource.findUniqueOrThrow({ where: { id: source.id } });
     expect(checked).toMatchObject({ suggestedKind: "GREENHOUSE", suggestedAdapterKey: "acme" });
+  });
+
+  it("uses the job pages' structured data", async () => {
+    const source = await prisma.jobSource.create({ data: { userId, url: sourceD } });
+    const run = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+    });
+    const { run: finished, evaluated } = await runWith(run.id, {});
+
+    // Only the open job in an accepted city is evaluated, from the posting's own ad.
+    expect(evaluated).toEqual(["# Job 9\n\nExample · Bengaluru\n\nBuild APIs."]);
+    expect(finished).toMatchObject({ status: "COMPLETED", eligible: 3, checked: 3, failed: 0 });
+    const results = await prisma.jobResult.findMany({
+      where: { runId: run.id },
+      orderBy: { jobUrl: "asc" },
+      select: { jobUrl: true, isMatch: true, reason: true, skipped: true, locations: true },
+    });
+    expect(results).toEqual([
+      {
+        jobUrl: jobUrl("7"),
+        isMatch: null,
+        reason: "The posting has closed (its page says it was valid until an earlier date)",
+        skipped: "EXPIRED",
+        locations: ["Bengaluru"],
+      },
+      {
+        jobUrl: jobUrl("8"),
+        isMatch: false,
+        reason: "Doesn't meet your requirements (from the job page's structured data)",
+        skipped: null,
+        locations: ["Mumbai"],
+      },
+      {
+        jobUrl: jobUrl("9"),
+        isMatch: false,
+        reason: "Missing skills",
+        skipped: null,
+        locations: ["Bengaluru"],
+      },
+    ]);
+
+    // Settled jobs, expired ones included, are not read again in the same context.
+    const again = await prisma.run.create({
+      data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+    });
+    const repeat = await runWith(again.id, {});
+    expect(repeat.evaluated).toEqual([]);
+    expect(repeat.run).toMatchObject({ status: "COMPLETED", checked: 0 });
+  });
+
+  it("keeps only titles that pass the keyword filters", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.settings.update({
+      where: { userId },
+      data: { titleInclude: ["job"], titleExclude: ["3", "Job 4"] },
+    });
+    try {
+      const { run, evaluated } = await runWith(await startRun(), {});
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("5")]);
+      expect(run).toMatchObject({ status: "COMPLETED", eligible: 2, checked: 2 });
+
+      // The filters are part of the context, so changing them analyses jobs again.
+      await prisma.settings.update({ where: { userId }, data: { titleExclude: ["3"] } });
+      const changed = await runWith(await startRun(), {});
+      expect(changed.evaluated).toEqual([jobUrl("1"), jobUrl("4"), jobUrl("5")]);
+      expect(changed.run.contextKey).not.toBe(run.contextKey);
+    } finally {
+      await prisma.settings.update({
+        where: { userId },
+        data: { titleInclude: [], titleExclude: [] },
+      });
+    }
+  });
+
+  it("reads only the titles triage ranks as likely fits, best first", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 2, "Job 3": 1, "Job 4": 3, "Job 5": 0 };
+    const { run, evaluated, triaged } = await runWith(await startRun(), { triage });
+
+    expect(triaged).toEqual([["Job 1", "Job 3", "Job 4", "Job 5"]]);
+    expect(evaluated).toEqual([jobUrl("4"), jobUrl("1")]);
+    expect(run).toMatchObject({ status: "COMPLETED", eligible: 4, checked: 2, failed: 0 });
+    const skipped = await prisma.jobResult.findMany({
+      where: { runId: run.id, skipped: "TRIAGE" },
+      orderBy: { jobUrl: "asc" },
+      select: { jobUrl: true, isMatch: true, reason: true, error: true },
+    });
+    expect(skipped).toEqual([
+      { jobUrl: jobUrl("3"), isMatch: null, reason: "Skipped by title triage", error: null },
+      { jobUrl: jobUrl("5"), isMatch: null, reason: "Skipped by title triage", error: null },
+    ]);
+
+    // Rejected jobs are settled for this context, so they are not triaged again.
+    const again = await runWith(await startRun(), { triage });
+    expect(again.triaged).toEqual([]);
+    expect(again.evaluated).toEqual([]);
+  });
+
+  it("limits the run to the best-ranked jobs", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 2, "Job 3": 2, "Job 4": 3, "Job 5": 3 };
+    const { evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([jobUrl("4"), jobUrl("5"), jobUrl("1")]);
+  });
+
+  it("checks jobs without triage when the triage request fails", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = new OpenRouterRequestFailed({ status: 500, message: "Upstream error" });
+    const { run, evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    expect(run).toMatchObject({ status: "COMPLETED", checked: 3 });
+  });
+
+  it("stops the run when triage is refused for the API key", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = new OpenRouterAuthError({ status: 401, message: "User not found." });
+    const { run, evaluated } = await runWith(await startRun(), { triage });
+    expect(evaluated).toEqual([]);
+    expect(run).toMatchObject({ status: "STOPPED", stopReason: "User not found." });
+  });
+
+  it("skips triage when it is turned off", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.settings.update({ where: { userId }, data: { triageEnabled: false } });
+    try {
+      const { evaluated, triaged } = await runWith(await startRun(), { triage: { "Job 1": 0 } });
+      expect(triaged).toEqual([]);
+      expect(evaluated).toEqual([jobUrl("1"), jobUrl("3"), jobUrl("4")]);
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { triageEnabled: true } });
+    }
+  });
+
+  it("checks jobs triage rejected once triage is turned off", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 3, "Job 3": 0, "Job 4": 3, "Job 5": 3 };
+    const first = await runWith(await startRun(), { triage });
+    expect(first.evaluated).not.toContain(jobUrl("3"));
+
+    await prisma.settings.update({ where: { userId }, data: { triageEnabled: false } });
+    try {
+      const { evaluated, triaged } = await runWith(await startRun(), {});
+      expect(triaged).toEqual([]);
+      expect(evaluated).toContain(jobUrl("3"));
+      const result = await prisma.jobResult.findFirstOrThrow({
+        where: { userId, jobUrl: jobUrl("3") },
+      });
+      expect(result).toMatchObject({ skipped: null, isMatch: false, error: null });
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { triageEnabled: true } });
+    }
+  });
+
+  it("updates a match saved under another spelling of the job's URL", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.match.deleteMany({ where: { userId, jobUrl: jobUrl("4") } });
+    const oldUrl = "https://Jobs.example.com/4/?utm_source=feed";
+    await prisma.match.create({
+      data: {
+        userId,
+        jobUrl: oldUrl,
+        title: "Job 4",
+        company: "Example",
+        reason: "Old",
+        status: "APPLIED",
+      },
+    });
+    await runWith(await startRun(), { verdicts: { [jobUrl("4")]: "match" } });
+
+    const matches = await prisma.match.findMany({
+      where: { userId, jobUrl: { in: [oldUrl, jobUrl("4")] } },
+    });
+    expect(matches).toMatchObject([{ jobUrl: oldUrl, status: "APPLIED", reason: "Strong fit" }]);
   });
 
   it("ignores a run that is no longer queued", async () => {

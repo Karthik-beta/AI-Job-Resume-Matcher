@@ -24,7 +24,15 @@ function optionalNumber(data: FormData, name: string) {
   return value === "" ? null : Number(value);
 }
 
-function toInput(data: FormData, includeUnknown: boolean) {
+// "Bengaluru, Remote" as ["Bengaluru", "Remote"].
+function list(data: FormData, name: string) {
+  return text(data, name)
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "");
+}
+
+function toInput(data: FormData, switches: { includeUnknown: boolean; triageEnabled: boolean }) {
   return {
     resumeUrl: optionalText(data, "resumeUrl"),
     discordWebhookUrl: optionalText(data, "discordWebhookUrl"),
@@ -32,12 +40,12 @@ function toInput(data: FormData, includeUnknown: boolean) {
     experienceMonths: Number(text(data, "experienceMonths")),
     targetMinYears: optionalNumber(data, "targetMinYears"),
     targetMaxYears: optionalNumber(data, "targetMaxYears"),
-    locations: text(data, "locations")
-      .split(",")
-      .map((city) => city.trim())
-      .filter((city) => city !== ""),
-    includeUnknown,
+    locations: list(data, "locations"),
+    includeUnknown: switches.includeUnknown,
+    titleInclude: list(data, "titleInclude"),
+    titleExclude: list(data, "titleExclude"),
     maxJobsPerRun: Number(text(data, "maxJobsPerRun")),
+    triageEnabled: switches.triageEnabled,
     scheduleMinutes: optionalNumber(data, "scheduleMinutes"),
   };
 }
@@ -88,6 +96,7 @@ function Form({
   refusedWebhook: string | null;
 }) {
   const [includeUnknown, setIncludeUnknown] = useState(settings.includeUnknown);
+  const [triageEnabled, setTriageEnabled] = useState(settings.triageEnabled);
   const [errors, setErrors] = useState<Record<string, string>>(
     refusedWebhook
       ? {
@@ -100,7 +109,7 @@ function Form({
 
   async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    const input = toInput(new FormData(event.currentTarget), includeUnknown);
+    const input = toInput(new FormData(event.currentTarget), { includeUnknown, triageEnabled });
     const result = validate(UpdateSettings, input);
     setErrors(result.errors);
     if (!result.value) return;
@@ -200,6 +209,28 @@ function Form({
           />,
           "Separate cities with commas.",
         )}
+        {field(
+          "titleInclude",
+          "Job titles must include",
+          <Input
+            id="titleInclude"
+            name="titleInclude"
+            defaultValue={settings.titleInclude.join(", ")}
+            placeholder="Backend, Full stack"
+          />,
+          "Any of these words or phrases, separated by commas. Leave empty to allow any title.",
+        )}
+        {field(
+          "titleExclude",
+          "Job titles must not include",
+          <Input
+            id="titleExclude"
+            name="titleExclude"
+            defaultValue={settings.titleExclude.join(", ")}
+            placeholder="Senior, Intern"
+          />,
+          "None of these words or phrases, separated by commas.",
+        )}
         <Field orientation="horizontal">
           <Switch
             id="includeUnknown"
@@ -220,6 +251,16 @@ function Form({
             defaultValue={settings.maxJobsPerRun}
           />,
         )}
+        <Field orientation="horizontal">
+          <Switch id="triageEnabled" checked={triageEnabled} onCheckedChange={setTriageEnabled} />
+          <div className="flex flex-col gap-1">
+            <FieldLabel htmlFor="triageEnabled">Rank job titles before checking jobs</FieldLabel>
+            <FieldDescription>
+              One quick model request ranks every title against your resume, and only likely fits
+              are read and checked. Turn off to check every eligible job.
+            </FieldDescription>
+          </div>
+        </Field>
         {field(
           "discordWebhookUrl",
           "Discord webhook URL",
