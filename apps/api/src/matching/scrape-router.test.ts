@@ -20,6 +20,7 @@ import {
   type RouterConfig,
   ScrapeHealth,
 } from "./scrape-router";
+import { memoryScrapeRouteStore, ScrapeRouteStore } from "./scrape-routes";
 
 type Reply = ScrapedPage | FirecrawlRequestFailed;
 
@@ -242,6 +243,7 @@ describe("hybrid mode", () => {
       mode: "hybrid",
       local: instances.local.backend,
       cloud: instances.cloud.backend,
+      routes: memoryScrapeRouteStore().store,
       ...(budget ? { budget } : {}),
     };
     return { firecrawl: makeScrapeRouter(config), ...instances };
@@ -372,12 +374,15 @@ describe("checkLocalFirecrawl", () => {
 });
 
 describe("firecrawlLayer", () => {
-  const health = (layer: Layer.Layer<Firecrawl | ScrapeHealth>) =>
+  const health = (layer: Layer.Layer<Firecrawl | ScrapeHealth, never, ScrapeRouteStore>) =>
     run(
       Effect.gen(function* () {
         yield* Firecrawl;
         return yield* (yield* ScrapeHealth).check;
-      }).pipe(Effect.provide(layer)),
+      }).pipe(
+        Effect.provide(layer),
+        Effect.provideService(ScrapeRouteStore, memoryScrapeRouteStore().store),
+      ),
     );
 
   test("checks the local instance only when one is used", async () => {

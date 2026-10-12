@@ -79,7 +79,7 @@ bun run dev
 
 Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of `openssl rand -base64 32`.
 
-The worker needs `OPENROUTER_API_KEY` and a Firecrawl to scrape with, chosen by `FIRECRAWL_MODE`: `cloud` (the default) needs `FIRECRAWL_API_KEY`; `local` needs `FIRECRAWL_LOCAL_URL` (a self-hosted Firecrawl, see below); `hybrid` needs both and sends only the pages that block the local instance to the cloud. Without them the API still starts, but the worker exits. A run in `local` or `hybrid` mode stops at once if the local instance is not running. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
+The worker needs `OPENROUTER_API_KEY` and a Firecrawl to scrape with, chosen by `FIRECRAWL_MODE`: `cloud` (the default) needs `FIRECRAWL_API_KEY`; `local` needs `FIRECRAWL_LOCAL_URL` (a self-hosted Firecrawl, see below); `hybrid` needs both and sends only the pages that block the local instance to the cloud; a site that blocks it twice in a row goes straight to the cloud for a week. Without them the API still starts, but the worker exits. A run in `local` or `hybrid` mode stops at once if the local instance is not running. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
 
 ### Self-hosted Firecrawl
 

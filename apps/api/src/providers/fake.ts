@@ -30,6 +30,7 @@ import {
   type RouterConfig,
   ScrapeHealth,
 } from "../matching/scrape-router";
+import { memoryScrapeRouteStore } from "../matching/scrape-routes";
 import { hostLimiterLayer } from "../matching/sources/http";
 import { markdownLinks } from "../matching/sources/page-links";
 import { TitleTriage } from "../matching/triage";
@@ -108,7 +109,12 @@ const fakeRouterConfig = (mode: FirecrawlMode): RouterConfig => {
     case "local":
       return { mode, local: fakeBackend("local") };
     case "hybrid":
-      return { mode, cloud: fakeBackend("cloud"), local: fakeBackend("local") };
+      return {
+        mode,
+        cloud: fakeBackend("cloud"),
+        local: fakeBackend("local"),
+        routes: memoryScrapeRouteStore().store,
+      };
   }
 };
 

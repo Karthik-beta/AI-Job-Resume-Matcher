@@ -8,6 +8,7 @@ import {
   type FirecrawlError,
   type FirecrawlRequestFailed,
   firecrawlFrom,
+  hostOf,
   localLimiter,
   makeBackend,
   type PageKind,
@@ -17,6 +18,7 @@ import {
   sdkClient,
   type Via,
 } from "./firecrawl";
+import { noteLocalBlock, prefersCloud, ScrapeRouteStore } from "./scrape-routes";
 
 export type FirecrawlMode = "cloud" | "local" | "hybrid";
 
@@ -141,6 +143,7 @@ export type RouterConfig =
       readonly mode: "hybrid";
       readonly cloud: ScrapeBackend;
       readonly local: ScrapeBackend;
+      readonly routes: ScrapeRouteStore["Service"];
       readonly budget?: CloudBudget;
     };
 
@@ -216,17 +219,24 @@ const localOnly = <A>(local: ScrapeBackend, attempt: Attempt<A>) =>
   );
 
 // Local first; only a page the site blocked is retried on the cloud, once, with the auto
-// proxy. A gone or failed page would fail there too.
+// proxy. A gone or failed page would fail there too. Sites that keep blocking the local
+// instance go straight to the cloud for a while (see scrape-routes.ts).
 const hybrid = <A>(
   config: Extract<RouterConfig, { mode: "hybrid" }>,
+  url: string,
   attempt: Attempt<A>,
 ): Effect.Effect<Routed<A>, FirecrawlError> =>
   Effect.gen(function* () {
-    const { sent, result, outcome } = yield* sendLocal(config.local, attempt);
-    if (sent._tag === "Success" && outcome === "ok") {
-      return { value: sent.success, usage: { via: "local", credits: 0 } as const };
+    const domain = hostOf(url);
+    if (!(yield* prefersCloud(config.routes, domain))) {
+      const { sent, result, outcome } = yield* sendLocal(config.local, attempt);
+      if (sent._tag === "Success" && outcome === "ok") {
+        yield* config.routes.localWorked(domain);
+        return { value: sent.success, usage: { via: "local", credits: 0 } as const };
+      }
+      if (outcome !== "blocked") return yield* failureOf(result, outcome, "local");
+      yield* noteLocalBlock(config.routes, domain);
     }
-    if (outcome !== "blocked") return yield* failureOf(result, outcome, "local");
     const budget = config.budget ?? unlimitedBudget;
     if (!(yield* budget.allows)) {
       return yield* new ScrapeFailed({ status: null, message: needsCloudMessage });
@@ -259,7 +269,7 @@ export const makeScrapeRouter = (config: RouterConfig) => {
         case "local":
           return localOnly(config.local, attempt);
         case "hybrid":
-          return hybrid(config, attempt);
+          return hybrid(config, url, attempt);
       }
     })();
     return routed.pipe(Effect.tap((done) => logUsage(url, done)));
@@ -314,6 +324,7 @@ export const firecrawlLayer = (config: FirecrawlConfig) =>
               mode: "hybrid",
               cloud: yield* cloudBackend(config.apiKey),
               local: yield* localBackend(config.localUrl),
+              routes: yield* ScrapeRouteStore,
             });
         }
       }),

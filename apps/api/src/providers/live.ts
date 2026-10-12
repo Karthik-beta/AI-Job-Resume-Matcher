@@ -13,7 +13,7 @@ import { titleTriageLayer } from "../matching/triage";
 // Only the worker with live providers needs these settings.
 const ProviderKeys = Schema.Struct({ OPENROUTER_API_KEY: Schema.NonEmptyString });
 
-// Needs the PageCacheStore, which the caller provides.
+// Needs the PageCacheStore and ScrapeRouteStore, which the caller provides.
 export const liveProvidersLayer = (model: string) => {
   const keys = Schema.decodeUnknownSync(ProviderKeys)(process.env);
   const documents = Layer.mergeAll(
