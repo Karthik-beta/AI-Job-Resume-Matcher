@@ -2,6 +2,7 @@ import { Effect, Layer } from "effect";
 import { type Download, HttpFetch } from "../src/matching/download";
 import { ScrapeFailed } from "../src/matching/errors";
 import { Firecrawl } from "../src/matching/firecrawl";
+import { ListingExtractor } from "../src/matching/listing-extractor";
 import type { ListingSource, SourceAdapter } from "../src/matching/sources/adapter";
 import { HostLimiter, makeHostLimiter } from "../src/matching/sources/http";
 
@@ -37,13 +38,18 @@ export const fakeHttp = (replies: Record<string, Reply>) => {
 
 const unusedFirecrawl = Firecrawl.of({
   scrapeMarkdown: () => Effect.die("Firecrawl is not used by ATS adapters"),
-  scrapeListings: () => Effect.die("Firecrawl is not used by ATS adapters"),
+  scrapeListingPage: () => Effect.die("Firecrawl is not used by ATS adapters"),
+});
+
+const unusedExtractor = ListingExtractor.of({
+  extract: () => Effect.die("The listing extractor is not used by ATS adapters"),
 });
 
 export const atsLayer = (http: HttpFetch["Service"]) =>
   Layer.mergeAll(
     Layer.succeed(HttpFetch, http),
     Layer.succeed(Firecrawl, unusedFirecrawl),
+    Layer.succeed(ListingExtractor, unusedExtractor),
     Layer.effect(HostLimiter, makeHostLimiter(0)),
   );
 

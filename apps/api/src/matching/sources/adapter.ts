@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import type { HttpFetch } from "../download";
 import { type FirecrawlBlocked, ScrapeFailed } from "../errors";
 import type { Firecrawl, Listing } from "../firecrawl";
+import type { ListingExtractor } from "../listing-extractor";
 import type { DetectedSource } from "./detect";
 import type { HostLimiter } from "./http";
 
@@ -12,6 +13,8 @@ export interface ListingSource {
   readonly adapterKey: string | null;
   // Null until the source is first checked.
   readonly lastCheckedAt?: Date | null;
+  // A CSS selector for the part of a page source that lists the jobs.
+  readonly selector?: string | null;
 }
 
 export interface SourceListings {
@@ -20,7 +23,7 @@ export interface SourceListings {
   readonly embedded?: DetectedSource | null;
 }
 
-export type AdapterServices = Firecrawl | HttpFetch | HostLimiter;
+export type AdapterServices = Firecrawl | HttpFetch | HostLimiter | ListingExtractor;
 
 export interface SourceAdapter {
   readonly fetchListings: (

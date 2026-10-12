@@ -6,8 +6,8 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import { TestClock } from "effect/testing";
+import { completionRequestInit } from "./completion";
 import {
-  completionRequestInit,
   MatchEvaluator,
   type MatchInput,
   makeMatchEvaluator,

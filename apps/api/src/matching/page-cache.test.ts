@@ -4,6 +4,7 @@ import { TestClock } from "effect/testing";
 import { type Download, HttpFetch } from "./download";
 import { ScrapeFailed } from "./errors";
 import { Firecrawl, type Listing } from "./firecrawl";
+import { ListingExtractor } from "./listing-extractor";
 import {
   type CachedPage,
   jobPageFor,
@@ -42,6 +43,9 @@ const listing: Listing = {
   postedAt: null,
 };
 
+// The listing a page source reads from its link.
+const pageListing: Listing = { ...listing, locations: [], experienceMinYears: null };
+
 const pageSource = (url: string) => ({ url, kind: "PAGE", adapterKey: null }) as const;
 
 const memoryStore = () => {
@@ -67,10 +71,10 @@ const fakeFirecrawl = (fail = false, markdown?: string) => {
           ? Effect.fail(new ScrapeFailed({ status: 500, message: "Server error" }))
           : Effect.succeed(markdown ?? `Markdown ${scraped.length}`);
       }),
-    scrapeListings: (url) =>
+    scrapeListingPage: (url) =>
       Effect.sync(() => {
         scraped.push(url);
-        return { listings: [listing], rawHtml: null, links: [] };
+        return { markdown: "[Engineer](/job/1)", links: [], rawHtml: null, siteName: "Example" };
       }),
   });
   return { scraped, firecrawl };
@@ -93,13 +97,18 @@ const setup = (options: { fail?: boolean; markdown?: string; respond?: Respond }
   const layer = Layer.mergeAll(
     Layer.succeed(PageCacheStore, memory.store),
     Layer.succeed(Firecrawl, fake.firecrawl),
+    Layer.succeed(ListingExtractor, ListingExtractor.of({ extract: () => Effect.die("unused") })),
     Layer.succeed(HttpFetch, http),
     Layer.succeed(PdfParser, makePdfParser(liteParseText)),
     Layer.effect(HostLimiter, makeHostLimiter(0)),
     TestClock.layer(),
   );
   const run = <A, E>(
-    program: Effect.Effect<A, E, PageCacheStore | Firecrawl | HttpFetch | PdfParser | HostLimiter>,
+    program: Effect.Effect<
+      A,
+      E,
+      PageCacheStore | Firecrawl | ListingExtractor | HttpFetch | PdfParser | HostLimiter
+    >,
   ) => program.pipe(Effect.provide(layer), Effect.runPromise);
   return { ...memory, ...fake, requests, run };
 };
@@ -128,7 +137,7 @@ describe("page cache", () => {
       yield* scrapeSourceListings("alice", pageSource(url));
       return first;
     });
-    expect(await run(program)).toEqual({ listings: [listing], embedded: null });
+    expect(await run(program)).toEqual({ listings: [pageListing], embedded: null });
     expect(scraped).toEqual([url, url]);
   });
 
@@ -177,7 +186,7 @@ describe("page cache", () => {
       expiresAt: null,
     });
     expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual({
-      listings: [listing],
+      listings: [pageListing],
       embedded: null,
     });
     expect(scraped).toEqual([url]);

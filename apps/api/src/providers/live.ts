@@ -3,6 +3,7 @@ import { discordNotifierLayer } from "../matching/discord";
 import { httpFetchLayer } from "../matching/download";
 import { matchEvaluatorLayer } from "../matching/evaluate";
 import { firecrawlLayer } from "../matching/firecrawl";
+import { listingExtractorLayer } from "../matching/listing-extractor";
 import { pdfParserLayer } from "../matching/pdf";
 import { resumeSourceLayer } from "../matching/resume-source";
 import { routingFromEnv } from "../matching/routing";
@@ -22,13 +23,15 @@ export const liveProvidersLayer = (model: string) => {
     httpFetchLayer,
     pdfParserLayer,
   );
+  const openRouter = {
+    apiKey: keys.OPENROUTER_API_KEY,
+    model,
+    routing: routingFromEnv(process.env),
+  };
   return Layer.mergeAll(
     resumeSourceLayer.pipe(Layer.provideMerge(documents)),
-    matchEvaluatorLayer({
-      apiKey: keys.OPENROUTER_API_KEY,
-      model,
-      routing: routingFromEnv(process.env),
-    }),
+    matchEvaluatorLayer(openRouter),
+    listingExtractorLayer(openRouter),
     discordNotifierLayer,
     hostLimiterLayer,
   );

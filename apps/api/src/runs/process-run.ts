@@ -7,6 +7,7 @@ import type { HttpFetch } from "../matching/download";
 import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
+import type { ListingExtractor } from "../matching/listing-extractor";
 import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
@@ -20,6 +21,7 @@ export type RunServices =
   | PageCacheStore
   | HttpFetch
   | HostLimiter
+  | ListingExtractor
   | PdfParser
   | ResumeSource
   | MatchEvaluator
