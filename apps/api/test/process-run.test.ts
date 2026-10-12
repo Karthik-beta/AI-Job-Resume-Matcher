@@ -505,6 +505,26 @@ describe("process run", () => {
     }
   });
 
+  it("checks jobs triage rejected once triage is turned off", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    const triage = { "Job 1": 3, "Job 3": 0, "Job 4": 3, "Job 5": 3 };
+    const first = await runWith(await startRun(), { triage });
+    expect(first.evaluated).not.toContain(jobUrl("3"));
+
+    await prisma.settings.update({ where: { userId }, data: { triageEnabled: false } });
+    try {
+      const { evaluated, triaged } = await runWith(await startRun(), {});
+      expect(triaged).toEqual([]);
+      expect(evaluated).toContain(jobUrl("3"));
+      const result = await prisma.jobResult.findFirstOrThrow({
+        where: { userId, jobUrl: jobUrl("3") },
+      });
+      expect(result).toMatchObject({ skipped: null, isMatch: false, error: null });
+    } finally {
+      await prisma.settings.update({ where: { userId }, data: { triageEnabled: true } });
+    }
+  });
+
   it("ignores a run that is no longer queued", async () => {
     const runId = await startRun();
     await prisma.run.update({ where: { id: runId }, data: { status: "STOPPED" } });

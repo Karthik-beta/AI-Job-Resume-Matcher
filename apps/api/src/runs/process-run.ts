@@ -163,11 +163,20 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     );
     const analysed = yield* query(() =>
       prisma.jobResult.findMany({
-        where: { userId, contextKey, error: null, jobUrl: { in: eligible.map(({ url }) => url) } },
+        where: {
+          userId,
+          contextKey,
+          error: null,
+          jobUrl: { in: eligible.map(({ url }) => url) },
+          // With triage off every eligible job is checked, including ones triage once rejected.
+          ...(settings.triageEnabled
+            ? {}
+            : { OR: [{ skipped: null }, { skipped: { not: "TRIAGE" as const } }] }),
+        },
         select: { jobUrl: true },
       }),
     );
-    // Skipped jobs (expired, or rejected by triage) are settled too.
+    // Skipped jobs (expired, or rejected by triage while it is on) are settled too.
     const done = new Set(analysed.map(({ jobUrl }) => jobUrl));
     const pending = eligible.filter(({ url }) => !done.has(url));
 
