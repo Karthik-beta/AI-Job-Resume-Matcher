@@ -115,10 +115,11 @@ const descriptionOf = (posting: JsonRecord) => {
   return htmlToText(/<[a-z]/i.test(html) ? html : decodeEntities(html)) || null;
 };
 
-// A date without a time is valid through the end of that day.
+// A date without a time is valid through the end of that day, and a time without an offset
+// is read as UTC rather than in the server's time zone.
 const validThroughOf = (posting: JsonRecord) => {
   const value = text(posting["validThrough"]);
-  const iso = isoDate(value);
+  const iso = isoDate(/^\d{4}-\d{2}-\d{2}[T ][\d:.]+$/.test(value) ? `${value}Z` : value);
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return iso;
   return new Date(Date.parse(iso) + 24 * 60 * 60 * 1000 - 1).toISOString();
 };

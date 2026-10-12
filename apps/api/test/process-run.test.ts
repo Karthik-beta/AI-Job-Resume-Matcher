@@ -525,6 +525,28 @@ describe("process run", () => {
     }
   });
 
+  it("updates a match saved under another spelling of the job's URL", async () => {
+    await prisma.jobResult.deleteMany({ where: { userId } });
+    await prisma.match.deleteMany({ where: { userId, jobUrl: jobUrl("4") } });
+    const oldUrl = "https://Jobs.example.com/4/?utm_source=feed";
+    await prisma.match.create({
+      data: {
+        userId,
+        jobUrl: oldUrl,
+        title: "Job 4",
+        company: "Example",
+        reason: "Old",
+        status: "APPLIED",
+      },
+    });
+    await runWith(await startRun(), { verdicts: { [jobUrl("4")]: "match" } });
+
+    const matches = await prisma.match.findMany({
+      where: { userId, jobUrl: { in: [oldUrl, jobUrl("4")] } },
+    });
+    expect(matches).toMatchObject([{ jobUrl: oldUrl, status: "APPLIED", reason: "Strong fit" }]);
+  });
+
   it("ignores a run that is no longer queued", async () => {
     const runId = await startRun();
     await prisma.run.update({ where: { id: runId }, data: { status: "STOPPED" } });
