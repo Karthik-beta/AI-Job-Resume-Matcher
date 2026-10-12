@@ -81,6 +81,14 @@ Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of
 
 The worker needs `OPENROUTER_API_KEY` and a Firecrawl to scrape with, chosen by `FIRECRAWL_MODE`: `cloud` (the default) needs `FIRECRAWL_API_KEY`; `local` needs `FIRECRAWL_LOCAL_URL` (a self-hosted Firecrawl, see below); `hybrid` needs both and sends only the pages that block the local instance to the cloud. Without them the API still starts, but the worker exits. A run in `local` or `hybrid` mode stops at once if the local instance is not running. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
 
+### Self-hosted Firecrawl
+
+`local` and `hybrid` mode scrape with a self-hosted Firecrawl. `docker-compose.yml` runs one under the `firecrawl` profile, on Firecrawl's published images (pinned to 2.11.506): set `COMPOSE_PROFILES=firecrawl` and `FIRECRAWL_LOCAL_URL=http://localhost:3002` in `.env`, and `bun run dev` starts it with Postgres and Redis. The images take about 6 GB on disk; once pulled, the stack is ready in about 90 seconds, and it uses about 4 GB of memory while scraping. It needs no API key and only publishes port 3002. To stop it without touching the app's database:
+
+```bash
+docker compose --profile firecrawl stop firecrawl-api firecrawl-playwright firecrawl-redis firecrawl-rabbitmq firecrawl-postgres
+```
+
 When `.env.example` gains a new variable, copy it into your `.env`. The API refuses to start if a required variable is missing.
 
 If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE_URL`.

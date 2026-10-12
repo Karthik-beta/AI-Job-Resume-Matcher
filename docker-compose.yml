@@ -25,5 +25,110 @@ services:
       timeout: 5s
       retries: 15
 
+  # Self-hosted Firecrawl for FIRECRAWL_MODE=local or hybrid, started with
+  # COMPOSE_PROFILES=firecrawl (see .env.example). The services follow Firecrawl's own
+  # docker-compose.yaml at v2.11.506, on its published images. Only the API is published, on
+  # port 3002; its Redis and Postgres stay inside the network, clear of the app's.
+  firecrawl-api:
+    image: ghcr.io/firecrawl/firecrawl:2.11.506
+    profiles: ["firecrawl"]
+    command: node dist/src/harness.js --start-docker
+    environment:
+      HOST: "0.0.0.0"
+      PORT: 3002
+      EXTRACT_WORKER_PORT: 3004
+      WORKER_PORT: 3005
+      ENV: local
+      # No database means no API keys: the API accepts any request.
+      USE_DB_AUTHENTICATION: "false"
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000/scrape
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: 5432
+      NUQ_RABBITMQ_URL: amqp://firecrawl-rabbitmq:5672
+      NUM_WORKERS_PER_QUEUE: 8
+      CRAWL_CONCURRENT_REQUESTS: 10
+      MAX_CONCURRENT_JOBS: 5
+      BROWSER_POOL_SIZE: 5
+      HARNESS_STARTUP_TIMEOUT_MS: 60000
+    ports:
+      - "3002:3002"
+    ulimits:
+      nofile: { soft: 65535, hard: 65535 }
+    cpus: 4.0
+    mem_limit: 8G
+    memswap_limit: 8G
+    depends_on:
+      firecrawl-redis: { condition: service_healthy }
+      firecrawl-playwright: { condition: service_started }
+      firecrawl-rabbitmq: { condition: service_healthy }
+      firecrawl-postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3002/v0/health/readiness"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  firecrawl-playwright:
+    image: ghcr.io/firecrawl/playwright-service@sha256:717699bf8a61d94451926c810d19ca1d36278192907e307bf5229a558b08fcc6
+    profiles: ["firecrawl"]
+    environment:
+      PORT: 3000
+      MAX_CONCURRENT_PAGES: 10
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cpus: 2.0
+    mem_limit: 4G
+    memswap_limit: 4G
+    tmpfs:
+      - /tmp/.cache:noexec,nosuid,size=1g
+
+  firecrawl-redis:
+    image: redis:8.10.2-alpine
+    profiles: ["firecrawl"]
+    command: redis-server --bind 0.0.0.0
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  firecrawl-rabbitmq:
+    image: rabbitmq:3.13.7-management
+    profiles: ["firecrawl"]
+    command: rabbitmq-server
+    healthcheck:
+      # Run as root, the check would write the Erlang cookie itself if it ran before the
+      # server had, leaving the server unable to read it; so it waits for the server's.
+      test:
+        - CMD-SHELL
+        - test -f /var/lib/rabbitmq/.erlang.cookie && rabbitmq-diagnostics -q check_running
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  # Firecrawl's job queue (NUQ), on Postgres by default.
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres@sha256:9b638af78d99873bc0ba2b57c9cbcd01df6ce96efeaa72d36cfbe0f76521e8fc
+    profiles: ["firecrawl"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
 volumes:
   postgres-data:
