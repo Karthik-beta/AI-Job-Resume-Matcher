@@ -1,9 +1,10 @@
+import type { SourceKind } from "@job-matcher/shared";
 import { Clock, Context, Duration, Effect, Layer, Option, Schema } from "effect";
 import type { CacheKind, Prisma, PrismaClient } from "../generated/prisma/client";
 import { HttpFetch, isSuccess } from "./download";
 import { Firecrawl, Listing } from "./firecrawl";
 import { isPdf, PdfParser, pdfOrMarkdown } from "./pdf";
-import type { ListingSource } from "./sources/adapter";
+import { type ListingSource, listingPage } from "./sources/adapter";
 import { adapterFor } from "./sources/registry";
 
 const listingsTtl = Duration.minutes(15);
@@ -115,3 +116,21 @@ export const scrapeSourceListings = (userId: string, source: ListingSource) =>
     listingsTtl,
     adapterFor(source.kind).fetchListings(source),
   );
+
+const withDescription = (listing: Listing, description: string) =>
+  listingPage({ ...listing, description });
+
+// A listing that came with its job ad is not scraped. Otherwise the source's API supplies the
+// ad when it can, and the page is scraped as a last resort; both are cached like job pages.
+export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =>
+  Effect.gen(function* () {
+    if (listing.description !== undefined) return withDescription(listing, listing.description);
+    const { fetchDescription } = adapterFor(kind);
+    if (!fetchDescription) return yield* scrapeJobPage(userId, listing.url);
+    return yield* cached(
+      { userId, url: listing.url, kind: "JOB_PAGE" },
+      decodeMarkdown,
+      null,
+      fetchDescription(listing).pipe(Effect.map((text) => withDescription(listing, text))),
+    );
+  });

@@ -6,6 +6,7 @@ import { ScrapeFailed } from "./errors";
 import { Firecrawl, type Listing } from "./firecrawl";
 import {
   type CachedPage,
+  jobPageFor,
   PageCacheStore,
   type PageKey,
   scrapeJobPage,
@@ -174,6 +175,47 @@ describe("page cache", () => {
     });
     expect(await run(scrapeSourceListings("alice", pageSource(url)))).toEqual([listing]);
     expect(scraped).toEqual([url]);
+  });
+});
+
+describe("job pages for listings", () => {
+  const jobUrl = "https://jobs.smartrecruiters.com/BoschGroup/744000154933569";
+  const apiUrl = "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000154933569";
+  const job: Listing = { ...listing, url: jobUrl, title: "Intern", company: "Bosch Group" };
+
+  test("uses the listing's own job ad without scraping or caching", async () => {
+    const { run, scraped, requests, rows } = setup();
+    const page = await run(jobPageFor("alice", { ...job, description: "Ad text" }, "LEVER"));
+    expect(page).toBe("# Intern\n\nBosch Group · Bengaluru\n\nAd text");
+    expect([...scraped, ...requests]).toEqual([]);
+    expect(rows.size).toBe(0);
+  });
+
+  test("reads a missing job ad from the source's API once", async () => {
+    const posting = await Bun.file(
+      new URL("../../test/fixtures/ats/smartrecruiters-posting.json", import.meta.url),
+    ).text();
+    const { run, scraped, requests } = setup({
+      respond: (url) =>
+        url === apiUrl
+          ? { status: 200, headers: new Headers(), body: new TextEncoder().encode(posting) }
+          : null,
+    });
+    const program = Effect.all([
+      jobPageFor("alice", job, "SMARTRECRUITERS"),
+      jobPageFor("alice", job, "SMARTRECRUITERS"),
+    ]);
+    const [first, second] = await run(program);
+    expect(first).toStartWith("# Intern\n\nBosch Group · Bengaluru\n\nJob Description");
+    expect(second).toBe(first);
+    expect(requests).toEqual([`GET ${apiUrl}`]);
+    expect(scraped).toEqual([]);
+  });
+
+  test("scrapes the job page when the source cannot supply the ad", async () => {
+    const { run, scraped } = setup();
+    expect(await run(jobPageFor("alice", job, "PAGE"))).toBe("Markdown 1");
+    expect(scraped).toEqual([jobUrl]);
   });
 });
 

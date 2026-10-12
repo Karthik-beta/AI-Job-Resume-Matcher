@@ -17,6 +17,10 @@ export interface SourceAdapter {
   readonly fetchListings: (
     source: ListingSource,
   ) => Effect.Effect<readonly Listing[], ScrapeFailed | FirecrawlBlocked, AdapterServices>;
+  // Reads the job ad for a listing that came without one, instead of scraping its page.
+  readonly fetchDescription?: (
+    listing: Listing,
+  ) => Effect.Effect<string, ScrapeFailed, AdapterServices>;
 }
 
 export const boardKey = (source: ListingSource, label: string) =>

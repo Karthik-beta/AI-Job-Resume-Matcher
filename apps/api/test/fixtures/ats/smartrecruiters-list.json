@@ -1,0 +1,65 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 2,
+  "content": [
+    {
+      "id": "744000154933569",
+      "name": "[Bosch HcP - Internship] Production Engineering Intern (Metal Forming & Washing)",
+      "uuid": "432995fc-c619-4e9b-b557-4f704537bbf5",
+      "refNumber": "REF298236U",
+      "company": {
+        "identifier": "BoschGroup",
+        "name": "Bosch Group"
+      },
+      "releasedDate": "2026-10-12T06:59:25.204Z",
+      "location": {
+        "city": "An Phuoc Commune",
+        "region": "Dong Nai",
+        "country": "vn",
+        "address": "Long Thanh Industrial Zone",
+        "remote": false,
+        "hybrid": false,
+        "fullLocation": "An Phuoc Commune, Dong Nai, Vietnam"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "internship",
+        "label": "Internship"
+      },
+      "ref": "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000154933569"
+    },
+    {
+      "id": "744000154931829",
+      "name": "Solution Manager - Custom Web & Mobile Solutions, Bosch Digital India",
+      "uuid": "da45684a-066b-406d-b32f-f35864f75ef4",
+      "refNumber": "REF297498Y",
+      "company": {
+        "identifier": "BoschGroup",
+        "name": "Bosch Group"
+      },
+      "releasedDate": "2026-10-12T06:50:49.288Z",
+      "location": {
+        "city": "bengaluru",
+        "country": "in",
+        "address": "no.123  industrial layout  hosur road  koramangala,",
+        "postalCode": "560095",
+        "remote": false,
+        "hybrid": false,
+        "fullLocation": "bengaluru, , India"
+      },
+      "typeOfEmployment": {
+        "id": "permanent",
+        "label": "Full-time"
+      },
+      "experienceLevel": {
+        "id": "associate",
+        "label": "Associate"
+      },
+      "ref": "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings/744000154931829"
+    }
+  ]
+}

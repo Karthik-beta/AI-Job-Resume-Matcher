@@ -1,3 +1,4 @@
+import type { SourceKind } from "@job-matcher/shared";
 import { Effect } from "effect";
 import type { PrismaClient } from "../generated/prisma/client";
 import { contextKey as contextKeyOf } from "../matching/context-key";
@@ -6,11 +7,10 @@ import type { HttpFetch } from "../matching/download";
 import { SaveFailed, stopsRun } from "../matching/errors";
 import { MatchEvaluator } from "../matching/evaluate";
 import type { Firecrawl, Listing } from "../matching/firecrawl";
-import { type PageCacheStore, scrapeJobPage, scrapeSourceListings } from "../matching/page-cache";
+import { jobPageFor, type PageCacheStore, scrapeSourceListings } from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
 import { acceptsJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
-import { listingPage } from "../matching/sources/adapter";
 import type { HostLimiter } from "../matching/sources/http";
 import { requirementsOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
@@ -33,12 +33,6 @@ const uniqueByUrl = (listings: readonly Listing[]) => {
   for (const listing of listings) if (!byUrl.has(listing.url)) byUrl.set(listing.url, listing);
   return [...byUrl.values()];
 };
-
-// A listing from an ATS API carries its job ad, so only page sources' jobs are scraped.
-const jobPageOf = (userId: string, job: Listing) =>
-  job.description === undefined
-    ? scrapeJobPage(userId, job.url)
-    : Effect.succeed(listingPage({ ...job, description: job.description }));
 
 const saveMatch = (prisma: PrismaClient, userId: string, match: MatchFields) =>
   Effect.tryPromise({
@@ -87,10 +81,14 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       yield* evaluator.preflight;
       const resume = yield* resumeSource.resolve(userId, resumeUrl);
       const listings: Listing[] = [];
+      // Like uniqueByUrl, the first source to list a URL decides how its job ad is read.
+      const kindByUrl = new Map<string, SourceKind>();
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
-        listings.push(...(yield* scrapeSourceListings(userId, source)));
+        const found = yield* scrapeSourceListings(userId, source);
+        for (const { url } of found) if (!kindByUrl.has(url)) kindByUrl.set(url, source.kind);
+        listings.push(...found);
         yield* query(() =>
           prisma.jobSource.update({
             where: { id: source.id },
@@ -98,11 +96,11 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
           }),
         );
       }
-      return { resume, listings: uniqueByUrl(listings) };
+      return { resume, listings: uniqueByUrl(listings), kindByUrl };
     }).pipe(Effect.result);
     // Nothing can be analysed without the resume and listings, so every error here stops the run.
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
-    const { resume, listings } = prepared.success;
+    const { resume, listings, kindByUrl } = prepared.success;
 
     const eligible = listings.filter((listing) => acceptsJob(requirements, listing));
     // The run was created before the resume content was known, so its key is replaced here.
@@ -128,7 +126,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
     const selected = eligible.filter(({ url }) => !done.has(url)).slice(0, settings.maxJobsPerRun);
 
     for (const job of selected) {
-      const outcome = yield* jobPageOf(userId, job).pipe(
+      const outcome = yield* jobPageFor(userId, job, kindByUrl.get(job.url) ?? "PAGE").pipe(
         Effect.flatMap((jobPage) =>
           evaluator.evaluate({
             resume: resume.text,

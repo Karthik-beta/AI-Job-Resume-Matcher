@@ -1,0 +1,59 @@
+{
+  "jobs": [
+    {
+      "id": "7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "title": "Engineering Manager - EU",
+      "department": "Engineering",
+      "team": "EMEA Engineering",
+      "employmentType": "FullTime",
+      "location": "Remote - European Union",
+      "secondaryLocations": [
+        {
+          "location": "Spain"
+        },
+        {
+          "location": "Italy"
+        }
+      ],
+      "publishedAt": "2024-03-04T14:29:08.532+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application",
+      "descriptionPlain": "Hi 👋 I’m Colin https://uk.linkedin.com/in/colinhoweuk, Director of Engineering, Europe. How do you feel about software engineers writing product specs, making product decisions, and not breaking down projects into individual tickets? If that sounds exciting (even if a bit scary), read on because I’m looking for an engineering manager to help us build a different type of engineering team and culture at Ashby.\n\nTo start, why do we need to be different? Time and again, I have witnessed engineers knowing what needs to be done yet being unable to get things done because of “the process” or because",
+      "compensation": {
+        "compensationTierSummary": "€110K – €185K • Offers Equity • Offers Bonus",
+        "scrapeableCompensationSalarySummary": "€110K - €185K"
+      }
+    },
+    {
+      "id": "86a60834-ba64-484d-9658-afa1bc97a957",
+      "title": "Mid Market Account Executive - EMEA (French Speaking)",
+      "department": "Sales",
+      "team": "Sales",
+      "employmentType": "FullTime",
+      "location": "France",
+      "secondaryLocations": [
+        {
+          "location": "United Kingdom"
+        },
+        {
+          "location": "Belgium"
+        }
+      ],
+      "publishedAt": "2026-09-08T16:27:26.694+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/ashby/86a60834-ba64-484d-9658-afa1bc97a957",
+      "applyUrl": "https://jobs.ashbyhq.com/ashby/86a60834-ba64-484d-9658-afa1bc97a957/application",
+      "descriptionPlain": "WHY JOIN SALES AT ASHBY\n\nSales at Ashby is a unique opportunity to sell a product customers genuinely love https://www.ashbyhq.com/customers during an AI-fueled market expansion. Over 5,000 companies rely on Ashby, including OpenAI, Doctolib, Alan, Mistral and Monday.com http://Monday.com, and our business is durably growing faster than 100% year-over-year. We’re well funded https://www.ashbyhq.com/blog/culture/series-d, and on a path to profitability. That's exceptionally rare for a company at our scale, and puts us in the top 10% of benchmarks.\n\nNearly 1 in 3 of Ashby’s globally distributed ",
+      "compensation": {
+        "compensationTierSummary": "€110K – €195.5K • Offers Equity • Offers Commission • Multiple Ranges",
+        "scrapeableCompensationSalarySummary": "€110K - €195.5K"
+      }
+    }
+  ],
+  "apiVersion": "1"
+}
