@@ -13,5 +13,6 @@ apps/api/src/generated/
 .DS_Store
 
 Job Matcher Rebuild Plan.md
+Scraping Modes and Luna Flex Plan.md
 test-results/
 playwright-report/
