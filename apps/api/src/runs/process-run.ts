@@ -2,6 +2,7 @@ import type { SourceKind } from "@job-matcher/shared";
 import { Clock, Effect } from "effect";
 import type { JobResult, PrismaClient } from "../generated/prisma/client";
 import { contextKey as contextKeyOf } from "../matching/context-key";
+import { canonicalUrl, dedupeListings } from "../matching/dedupe";
 import { Notifier } from "../matching/discord";
 import type { HttpFetch } from "../matching/download";
 import { SaveFailed, stopsRun } from "../matching/errors";
@@ -29,13 +30,6 @@ export type RunServices =
   | Notifier;
 
 const query = <A>(run: () => Promise<A>) => Effect.promise(run);
-
-// Sources keep their first listing for a URL, as in the Python app.
-const uniqueByUrl = (listings: readonly Listing[]) => {
-  const byUrl = new Map<string, Listing>();
-  for (const listing of listings) if (!byUrl.has(listing.url)) byUrl.set(listing.url, listing);
-  return [...byUrl.values()];
-};
 
 type Verdict = Pick<JobResult, "isMatch" | "reason" | "skipped">;
 
@@ -99,7 +93,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
       yield* evaluator.preflight;
       const resume = yield* resumeSource.resolve(userId, resumeUrl);
       const listings: Listing[] = [];
-      // Like uniqueByUrl, the first source to list a URL decides how its job ad is read.
+      // As in dedupeListings, the first source to list a job page decides how its ad is read.
       const kindByUrl = new Map<string, SourceKind>();
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
@@ -109,7 +103,10 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
           embedded,
           listingHash,
         } = yield* scrapeSourceListings(userId, source);
-        for (const { url } of found) if (!kindByUrl.has(url)) kindByUrl.set(url, source.kind);
+        for (const { url } of found) {
+          const canonical = canonicalUrl(url);
+          if (!kindByUrl.has(canonical)) kindByUrl.set(canonical, source.kind);
+        }
         listings.push(...found);
         // A page that embeds an ATS board is offered as a switch on the sources page.
         const suggestion = embedded
@@ -126,7 +123,7 @@ export const processRun = (prisma: PrismaClient, runId: string, model: string) =
           }),
         );
       }
-      return { resume, listings: uniqueByUrl(listings), kindByUrl };
+      return { resume, listings: dedupeListings(listings), kindByUrl };
     }).pipe(Effect.result);
     // Nothing can be analysed without the resume and listings, so every error here stops the run.
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);

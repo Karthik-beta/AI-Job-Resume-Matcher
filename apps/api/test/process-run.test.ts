@@ -35,7 +35,15 @@ const sourceB = "https://board.example.com/b";
 const sourceC = "https://board.example.com/c";
 const listings: Record<string, Listing[]> = {
   [sourceA]: [listing("1", ["Bengaluru"]), listing("2", ["Mumbai"]), listing("3")],
-  [sourceB]: [listing("1", ["Bengaluru"], "Duplicate"), listing("4", ["Bengaluru"]), listing("5")],
+  // Each of the first three repeats a job from source A: by URL, by canonical URL, and by
+  // company, title and location.
+  [sourceB]: [
+    listing("1", ["Bengaluru"], "Duplicate"),
+    listing("2/?utm_source=feed#apply", ["Mumbai"], "Also duplicate"),
+    listing("10", ["bengaluru"], "Job 1"),
+    listing("4", ["Bengaluru"]),
+    listing("5"),
+  ],
   [sourceC]: [
     {
       ...listing("6", ["Bengaluru"], "Described"),
