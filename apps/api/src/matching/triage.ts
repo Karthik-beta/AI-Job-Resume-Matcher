@@ -89,8 +89,13 @@ export const triagePrompt =
   "You screen job titles for a candidate before their job ads are read. For each job, " +
   "score how likely the candidate is to be a good fit from its title, company and " +
   "location alone: 3 = strong fit, 2 = plausible, 1 = unlikely, 0 = clearly unrelated " +
-  "(another field, or far too senior or junior). When unsure, score 2. Give a short " +
-  "reason for scores below 2. Return one score for every job id.";
+  "(another field, or far too senior or junior). Judge the field and role first: the " +
+  "candidate's experience is checked later against the job ad, so a seniority word alone " +
+  "is no reason to score below 2. A Senior title often asks for 4 to 6 years. Score low " +
+  "for seniority only when the gap is clear, such as Staff, Principal, Director, Head of or " +
+  "manager roles for a candidate with under 8 years, or intern roles for an experienced " +
+  "one. When unsure, score 2. Give a short reason for scores below 2. Return one score for " +
+  "every job id.";
 
 export const triageJsonSchema = {
   type: "object",
