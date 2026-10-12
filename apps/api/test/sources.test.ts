@@ -70,7 +70,7 @@ describe("job sources", () => {
       });
       await prisma.jobSource.update({
         where: { id: source.id },
-        data: { suggestedKind: "LEVER", suggestedAdapterKey: "acme" },
+        data: { suggestedKind: "LEVER", suggestedAdapterKey: "acme", listingHash: "abc" },
       });
       const updated = await alice
         .patch(`/api/sources/${source.id}`)
@@ -81,6 +81,7 @@ describe("job sources", () => {
         adapterKey: "acme",
         suggestedKind: null,
         suggestedAdapterKey: null,
+        listingHash: null,
       });
       expect(await prisma.pageCache.count({ where: { userId: source.userId, url } })).toBe(0);
 

@@ -55,22 +55,23 @@ export const prismaPageCacheStore = (prisma: PrismaClient) =>
 export const pageCacheStoreLayer = (prisma: PrismaClient) =>
   Layer.succeed(PageCacheStore, prismaPageCacheStore(prisma));
 
-// A missing, expired or unreadable row counts as a miss. Failed scrapes are never stored.
+// A missing, expired or unreadable row counts as a miss. An expired row is handed to the
+// scrape, which may reuse it. Failed scrapes are never stored.
 const cached = <A extends Prisma.InputJsonValue, E, R>(
   key: PageKey,
   decode: (content: unknown) => Option.Option<A>,
   ttl: Duration.Duration | null,
-  scrape: Effect.Effect<A, E, R>,
+  scrape: (expired: A | null) => Effect.Effect<A, E, R>,
 ) =>
   Effect.gen(function* () {
     const store = yield* PageCacheStore;
     const hit = yield* store.get(key);
     const now = yield* Clock.currentTimeMillis;
-    if (hit && (hit.expiresAt === null || hit.expiresAt.getTime() > now)) {
-      const content = decode(hit.content);
-      if (Option.isSome(content)) return content.value;
+    const content = hit ? Option.getOrNull(decode(hit.content)) : null;
+    if (content !== null && (hit?.expiresAt === null || (hit?.expiresAt?.getTime() ?? 0) > now)) {
+      return content;
     }
-    const value = yield* scrape;
+    const value = yield* scrape(content);
     // Scrapes can wait on the rate limit, so the expiry starts once the page arrives.
     const scrapedAt = yield* Clock.currentTimeMillis;
     const expiresAt = ttl === null ? null : new Date(scrapedAt + Duration.toMillis(ttl));
@@ -107,27 +108,33 @@ const fetchJobPage = (url: string) =>
   });
 
 export const scrapeJobPage = (userId: string, url: string) =>
-  cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, fetchJobPage(url));
+  cached({ userId, url, kind: "JOB_PAGE" }, decodeMarkdown, null, () => fetchJobPage(url));
 
 // Keyed by the source URL; changing a source's kind clears its row (see SourcesService.update).
-// Only the listings are cached; an embedded board is reported by the scrape that found it.
+// Only the listings are cached; an embedded board and the listing hash are reported by the
+// scrape that found them. Expired listings are kept for a page source whose page is unchanged.
 export const scrapeSourceListings = (userId: string, source: ListingSource) =>
   Effect.gen(function* () {
-    const found: { embedded: DetectedSource | null } = { embedded: null };
+    const found: { embedded: DetectedSource | null; listingHash: string | null } = {
+      embedded: null,
+      listingHash: null,
+    };
     const listings = yield* cached(
       { userId, url: source.url, kind: "SOURCE_LISTING" },
       decodeListings,
       listingsTtl,
-      adapterFor(source.kind)
-        .fetchListings(source)
-        .pipe(
-          Effect.map((fetched) => {
-            found.embedded = fetched.embedded ?? null;
-            return fetched.listings;
-          }),
-        ),
+      (previous) =>
+        adapterFor(source.kind)
+          .fetchListings(source, previous)
+          .pipe(
+            Effect.map((fetched) => {
+              found.embedded = fetched.embedded ?? null;
+              found.listingHash = fetched.listingHash ?? null;
+              return fetched.listings;
+            }),
+          ),
     );
-    return { listings, embedded: found.embedded };
+    return { listings, ...found };
   });
 
 const withDescription = (listing: Listing, description: string) =>
@@ -140,10 +147,7 @@ export const jobPageFor = (userId: string, listing: Listing, kind: SourceKind) =
     if (listing.description !== undefined) return withDescription(listing, listing.description);
     const { fetchDescription } = adapterFor(kind);
     if (!fetchDescription) return yield* scrapeJobPage(userId, listing.url);
-    return yield* cached(
-      { userId, url: listing.url, kind: "JOB_PAGE" },
-      decodeMarkdown,
-      null,
+    return yield* cached({ userId, url: listing.url, kind: "JOB_PAGE" }, decodeMarkdown, null, () =>
       fetchDescription(listing).pipe(Effect.map((text) => withDescription(listing, text))),
     );
   });

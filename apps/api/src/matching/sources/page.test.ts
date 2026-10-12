@@ -8,7 +8,7 @@ import { Firecrawl, type Listing, type ListingPage } from "../firecrawl";
 import { type ExtractionInput, ListingExtractor } from "../listing-extractor";
 import type { ListingSource } from "./adapter";
 import { HostLimiter, makeHostLimiter } from "./http";
-import { maxExtractionChars, pageAdapter } from "./page";
+import { listingHashOf, maxExtractionChars, pageAdapter } from "./page";
 
 const job = (fields: Partial<Listing> & Pick<Listing, "title" | "url">): Listing => ({
   company: "Acme",
@@ -31,6 +31,7 @@ const source = (url: string, fields: Partial<ListingSource> = {}): ListingSource
 interface Options {
   readonly extracted?: readonly Listing[];
   readonly failExtraction?: boolean;
+  readonly previous?: readonly Listing[];
 }
 
 // Serves each scraped page from `pages` and records what the adapter asked for.
@@ -63,7 +64,7 @@ const fetchPage = async (
     if (logLevel === "Info") infos.push([message].flat().join(" "));
   });
   const result = await pageAdapter
-    .fetchListings(listingSource)
+    .fetchListings(listingSource, options.previous)
     .pipe(
       Effect.result,
       Effect.provide(
@@ -177,6 +178,41 @@ describe("page adapter model fallback", () => {
         _tag: "ScrapeFailed",
         message: `Could not read the listings on ${url}: User not found.`,
       },
+    });
+  });
+});
+
+describe("page adapter on an unchanged page", () => {
+  const url = "https://www.acme.com/careers";
+  const previous = [job({ title: "Listed before", url: "https://www.acme.com/jobs/1" })];
+
+  test("keeps the last listings without reading the links or asking the model", async () => {
+    const markdown = await pageFixture("acme-careers.md");
+    const listingHash = listingHashOf(markdown);
+    const { result, extractions } = await fetchPage(
+      source(url, { listingHash }),
+      { markdown },
+      { previous },
+    );
+    expect(result).toMatchObject({ _tag: "Success", success: { listings: previous, listingHash } });
+    expect(extractions).toEqual([]);
+  });
+
+  test.each<[string, string | null, readonly Listing[] | undefined]>([
+    ["the page changed", "an older hash", previous],
+    ["the listings are no longer cached", null, undefined],
+  ])("reads the page again when %s", async (_, listingHash, cached) => {
+    const markdown = await pageFixture("initech-apply-only.md");
+    const hash = listingHash ?? listingHashOf(markdown);
+    const { result, extractions } = await fetchPage(
+      source(url, { listingHash: hash }),
+      { markdown },
+      cached ? { previous: cached } : {},
+    );
+    expect(extractions).toHaveLength(1);
+    expect(result).toMatchObject({
+      _tag: "Success",
+      success: { listings: [], listingHash: listingHashOf(markdown) },
     });
   });
 });

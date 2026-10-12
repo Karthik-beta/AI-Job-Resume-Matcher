@@ -206,6 +206,8 @@ describe("process run", () => {
 
     const sources = await prisma.jobSource.findMany({ where: { userId } });
     expect(sources.every(({ lastCheckedAt }) => lastCheckedAt !== null)).toBe(true);
+    // Page sources keep the hash of the page their listings came from.
+    expect(sources.every(({ listingHash }) => listingHash?.length === 64)).toBe(true);
   });
 
   it("skips jobs already analysed in the same context but retries failed ones", async () => {

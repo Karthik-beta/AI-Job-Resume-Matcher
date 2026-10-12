@@ -15,19 +15,25 @@ export interface ListingSource {
   readonly lastCheckedAt?: Date | null;
   // A CSS selector for the part of a page source that lists the jobs.
   readonly selector?: string | null;
+  // The hash of the page source's markdown when its listings were last read.
+  readonly listingHash?: string | null;
 }
 
 export interface SourceListings {
   readonly listings: readonly Listing[];
   // An ATS board embedded in a page source, when its HTML was scanned; see embedded.ts.
   readonly embedded?: DetectedSource | null;
+  // Saved on a page source as its listingHash; see page.ts.
+  readonly listingHash?: string;
 }
 
 export type AdapterServices = Firecrawl | HttpFetch | HostLimiter | ListingExtractor;
 
 export interface SourceAdapter {
+  // `previous` holds the source's last listings, when the cache still has them.
   readonly fetchListings: (
     source: ListingSource,
+    previous?: readonly Listing[] | null,
   ) => Effect.Effect<SourceListings, ScrapeFailed | FirecrawlBlocked, AdapterServices>;
   // Reads the job ad for a listing that came without one, instead of scraping its page.
   readonly fetchDescription?: (

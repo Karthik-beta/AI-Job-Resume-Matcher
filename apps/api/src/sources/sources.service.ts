@@ -35,6 +35,7 @@ export class SourcesService {
           adapterKey: kind === "PAGE" ? null : adapterKey,
           suggestedKind: null,
           suggestedAdapterKey: null,
+          listingHash: null,
         },
       }),
       // Cached listings came from the previous kind.

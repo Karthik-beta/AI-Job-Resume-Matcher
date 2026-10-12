@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { ScrapeFailed } from "../errors";
 import { Firecrawl, type Listing, type ListingPage } from "../firecrawl";
@@ -57,6 +58,10 @@ const extractWithModel = (pageUrl: string, page: ListingPage) =>
     });
   });
 
+// Whitespace changes alone do not count as a changed page.
+export const listingHashOf = (markdown: string) =>
+  createHash("sha256").update(markdown.trim().replace(/\s+/g, " ")).digest("hex");
+
 export const pageListings = (pageUrl: string, page: ListingPage) => {
   const company = companyOf(pageUrl, page);
   const titled = findJobLinks(page.markdown, pageUrl).flatMap(({ url, title }) =>
@@ -69,7 +74,7 @@ export const pageListings = (pageUrl: string, page: ListingPage) => {
 // when they cannot be. The first check also fetches the page's HTML (no extra credits) to
 // spot an embedded ATS board.
 export const pageAdapter: SourceAdapter = {
-  fetchListings: (source) =>
+  fetchListings: (source, previous) =>
     Effect.gen(function* () {
       const firecrawl = yield* Firecrawl;
       const withHtml = source.lastCheckedAt === null;
@@ -77,8 +82,17 @@ export const pageAdapter: SourceAdapter = {
         selector: source.selector ?? null,
         withHtml,
       });
-      const listings = yield* pageListings(source.url, page);
-      if (!withHtml) return { listings };
-      return { listings, embedded: detectEmbeddedBoard(page.rawHtml ?? "", page.links) };
+      // An unchanged page keeps its last listings, without reading its links or the model.
+      const listingHash = listingHashOf(page.markdown);
+      const listings =
+        previous && source.listingHash === listingHash
+          ? previous
+          : yield* pageListings(source.url, page);
+      if (!withHtml) return { listings, listingHash };
+      return {
+        listings,
+        listingHash,
+        embedded: detectEmbeddedBoard(page.rawHtml ?? "", page.links),
+      };
     }),
 };
