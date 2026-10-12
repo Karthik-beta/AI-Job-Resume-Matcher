@@ -1,5 +1,5 @@
 import { OpenRouterClient } from "@effect/ai-openrouter";
-import { Context, Effect, Layer, Redacted } from "effect";
+import { Context, Effect, Layer, Redacted, Schedule } from "effect";
 import type * as AiError from "effect/ai/AiError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import {
@@ -105,6 +105,14 @@ const toEvaluateError = (routing: Routing) => (error: AiError.AiError) => {
   return openRouterErrorFromStatus(status, error.message);
 };
 
+// Flex capacity comes and goes, so 429 and 503 back off for 1, 2, 4, 8 and 16 minutes.
+// OpenRouter's error body is not checked to tell a key rate limit from missing flex
+// capacity, so every 429 backs off.
+const capacityRetries = 5;
+
+const isCapacityError = (error: { readonly status: number | null }) =>
+  error.status === 429 || error.status === 503;
+
 // Bun's fetch drops a connection that is idle for 5 minutes, and flex completions can take longer.
 export const completionRequestInit: BunFetchRequestInit = { timeout: 15 * 60 * 1000 };
 
@@ -143,6 +151,22 @@ export const makeMatchEvaluator = (model: string, routing: Routing) =>
           .pipe(
             Effect.provideService(FetchHttpClient.RequestInit, completionRequestInit),
             Effect.mapError(toEvaluateError(routing)),
+            Effect.retry({
+              schedule: Schedule.exponential("1 minute"),
+              times: capacityRetries,
+              while: isCapacityError,
+            }),
+            // Out of retries, only this job fails and the run moves on.
+            Effect.mapError((error) =>
+              isCapacityError(error)
+                ? new OpenRouterRequestFailed({
+                    status: error.status,
+                    message:
+                      `OpenRouter flex capacity unavailable after ${capacityRetries} retries: ` +
+                      error.message,
+                  })
+                : error,
+            ),
             Effect.tap(([body]) =>
               routing.serviceTier === "flex" && body.service_tier && body.service_tier !== "flex"
                 ? Effect.logWarning(

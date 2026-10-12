@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { OpenRouterClient } from "@effect/ai-openrouter";
-import { Context, Effect, Layer, Logger, Redacted } from "effect";
+import { Clock, Context, Effect, Fiber, Layer, Logger, Redacted } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { TestClock } from "effect/testing";
 import {
   completionRequestInit,
   MatchEvaluator,
@@ -21,7 +22,10 @@ interface SentRequest {
   readonly authorization: string | undefined;
   readonly body: Record<string, unknown>;
   readonly requestInit: globalThis.RequestInit | undefined;
+  readonly at: number;
 }
+
+type Reply = { readonly status?: number; readonly body: unknown };
 
 const completion = (
   content: string | null,
@@ -42,24 +46,26 @@ const completion = (
   ],
 });
 
-const evaluate = async (
-  reply: { status?: number; body: unknown },
-  input: Partial<MatchInput> = {},
-) => {
+// Replies are used in order and the last one repeats. A test clock skips the retry backoff.
+const evaluate = async (replies: Reply | readonly Reply[], input: Partial<MatchInput> = {}) => {
+  const queue = Array.isArray(replies) ? replies : [replies];
   const sent: SentRequest[] = [];
   const warnings: string[] = [];
   const http = HttpClient.make((request, url, _signal, fiber) =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const at = yield* Clock.currentTimeMillis;
+      const reply = queue[Math.min(sent.length, queue.length - 1)];
       const body = request.body._tag === "Uint8Array" ? request.body.body : new Uint8Array();
       sent.push({
         url: url.toString(),
         authorization: request.headers["authorization"],
         body: JSON.parse(new TextDecoder().decode(body)),
         requestInit: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit),
+        at,
       });
       return HttpClientResponse.fromWeb(
         request,
-        Response.json(reply.body, { status: reply.status ?? 200 }),
+        Response.json(reply?.body, { status: reply?.status ?? 200 }),
       );
     }),
   );
@@ -70,19 +76,25 @@ const evaluate = async (
   const logger = Logger.make(({ logLevel, message }) => {
     if (logLevel === "Warn") warnings.push([message].flat().join(" "));
   });
-  const outcome = await MatchEvaluator.use((evaluator) =>
-    evaluator.evaluate({ resume: "resume", jobPage: "job", ...input }),
-  ).pipe(
-    Effect.result,
+  const outcome = await Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(
+      MatchEvaluator.use((evaluator) =>
+        evaluator.evaluate({ resume: "resume", jobPage: "job", ...input }),
+      ).pipe(Effect.result),
+    );
+    yield* TestClock.adjust("1 hour");
+    return yield* Fiber.join(fiber);
+  }).pipe(
     Effect.provide(layer),
     Effect.provide(Logger.layer([logger])),
+    Effect.provide(TestClock.layer()),
     Effect.runPromise,
   );
   return { outcome, sent, warnings };
 };
 
-const failureOf = async (reply: { status?: number; body: unknown }) => {
-  const { outcome } = await evaluate(reply);
+const failureOf = async (replies: Reply | readonly Reply[]) => {
+  const { outcome } = await evaluate(replies);
   if (outcome._tag !== "Failure") throw new Error("Expected a failure");
   return outcome.failure;
 };
@@ -187,22 +199,50 @@ describe("evaluate service tier", () => {
   });
 });
 
+const httpError = (status: number, message = "Provider failure") => ({
+  status,
+  body: { error: { code: status, message } },
+});
+const minutes = (sent: readonly SentRequest[]) =>
+  sent.map(({ at }) => (at - (sent[0]?.at ?? 0)) / 60_000);
+
+describe("evaluate capacity retries", () => {
+  test.each([429, 503])("retries HTTP %p after a minute", async (status) => {
+    const { outcome, sent } = await evaluate([
+      httpError(status),
+      { body: completion('{"is_match":true,"reason":"Fit"}') },
+    ]);
+    expect(outcome._tag).toBe("Success");
+    expect(minutes(sent)).toEqual([0, 1]);
+  });
+
+  test.each([429, 503])(
+    "backs off HTTP %p exponentially, then fails only the job",
+    async (status) => {
+      const { outcome, sent } = await evaluate(httpError(status));
+      expect(minutes(sent)).toEqual([0, 1, 3, 7, 15, 31]);
+      if (outcome._tag !== "Failure") throw new Error("Expected a failure");
+      expect(outcome.failure).toMatchObject({ _tag: "OpenRouterRequestFailed", status });
+      expect(outcome.failure.message).toStartWith(
+        "OpenRouter flex capacity unavailable after 5 retries: ",
+      );
+    },
+  );
+});
+
 describe("evaluate errors", () => {
   test.each([
     [401, "OpenRouterAuthError"],
     [402, "OpenRouterUnavailable"],
     [403, "OpenRouterUnavailable"],
     [404, "OpenRouterUnavailable"],
-    [429, "OpenRouterUnavailable"],
     [400, "OpenRouterRequestFailed"],
     [500, "OpenRouterRequestFailed"],
     [502, "OpenRouterRequestFailed"],
-  ])("maps HTTP %p to %s", async (status, tag) => {
-    const error = await failureOf({
-      status,
-      body: { error: { code: status, message: "Provider failure" } },
-    });
-    expect(error).toMatchObject({ _tag: tag, status });
+  ])("maps HTTP %p to %s without retrying", async (status, tag) => {
+    const { outcome, sent } = await evaluate(httpError(status));
+    expect(outcome).toMatchObject({ _tag: "Failure", failure: { _tag: tag, status } });
+    expect(sent).toHaveLength(1);
   });
 
   test.each([
