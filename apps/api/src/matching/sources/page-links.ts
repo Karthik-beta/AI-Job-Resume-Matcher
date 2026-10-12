@@ -33,7 +33,17 @@ const siteOf = (hostname: string) => {
   return labels.slice(-size).join(".");
 };
 
-const jobPath = /\/(?:jobs?|positions?|openings?|vacancy|vacancies)\/[^/]+|\/careers\/[^/]+\//i;
+const jobPath = /\/(?:jobs?|positions?|openings?|vacancy|vacancies)\/[^/]+|\/careers\/[^/]+\/[^/]/i;
+// /careers/<slug>: a posting when the slug has several words or a number, unless it names
+// a section of the careers site. One word, like /careers/engineering, is a section too.
+const careersSlug = /\/careers\/([^/]+)\/?$/i;
+const careersSections =
+  /^(?:life-at-.*|how-we-hire|benefits|teams|locations|students|internships|early-careers|search|all|open-positions|jobs)$/i;
+
+const isCareersPosting = (pathname: string) => {
+  const slug = careersSlug.exec(pathname)?.[1] ?? "";
+  return /[-\d]/.test(slug) && !careersSections.test(slug);
+};
 const idSegment = /^(?:\d{4,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const pagingPath = /\/page\/\d+\/?$/i;
 const filterPath =
@@ -54,7 +64,7 @@ const filterParams = [
 
 const looksLikeJob = (url: URL) => {
   const last = url.pathname.split("/").filter(Boolean).at(-1) ?? "";
-  return jobPath.test(url.pathname) || idSegment.test(last);
+  return jobPath.test(url.pathname) || isCareersPosting(url.pathname) || idSegment.test(last);
 };
 
 const isListingNavigation = (url: URL) =>
