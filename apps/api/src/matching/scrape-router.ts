@@ -218,9 +218,10 @@ const localOnly = <A>(local: ScrapeBackend, attempt: Attempt<A>) =>
     ),
   );
 
-// Local first; only a page the site blocked is retried on the cloud, once, with the auto
-// proxy. A gone or failed page would fail there too. Sites that keep blocking the local
-// instance go straight to the cloud for a while (see scrape-routes.ts).
+// Local first; only a page the site blocked, or one the local instance could not answer, is
+// retried on the cloud, once, with the auto proxy. A gone or failed page would fail there
+// too. Sites that keep blocking the local instance go straight to the cloud for a while (see
+// scrape-routes.ts).
 const hybrid = <A>(
   config: Extract<RouterConfig, { mode: "hybrid" }>,
   url: string,
@@ -234,8 +235,12 @@ const hybrid = <A>(
         yield* config.routes.localWorked(domain);
         return { value: sent.success, usage: { via: "local", credits: 0 } as const };
       }
-      if (outcome !== "blocked") return yield* failureOf(result, outcome, "local");
-      yield* noteLocalBlock(config.routes, domain);
+      if (outcome !== "blocked" && outcome !== "unreachable") {
+        return yield* failureOf(result, outcome, "local");
+      }
+      // Only the page's own evidence counts against the site: a local instance that is down
+      // or failing must not send every domain to the cloud for a week.
+      if (outcome === "blocked") yield* noteLocalBlock(config.routes, domain);
     }
     const budget = config.budget ?? unlimitedBudget;
     if (!(yield* budget.allows)) {

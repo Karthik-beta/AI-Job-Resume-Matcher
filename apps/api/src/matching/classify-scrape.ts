@@ -1,8 +1,10 @@
 import type { FirecrawlRequestFailed, PageKind, ScrapedPage } from "./firecrawl";
 
-// ok: use the page. blocked: the site kept the scraper out, so another instance may get in.
-// gone: the page no longer exists. failed: any other error, which retrying will not fix.
-export type ScrapeOutcome = "ok" | "blocked" | "gone" | "failed";
+// ok: use the page. blocked: the page itself shows the site kept the scraper out, so another
+// instance may get in. unreachable: the scraping instance gave no answer about the page (no
+// response, a timeout, or its own 5xx); another instance may get in, but the site is not to
+// blame. gone: the page no longer exists. failed: any other error, which retrying will not fix.
+export type ScrapeOutcome = "ok" | "blocked" | "unreachable" | "gone" | "failed";
 
 export type ScrapeResult =
   | { readonly page: ScrapedPage }
@@ -53,9 +55,9 @@ const hasChallenge = ({ markdown, rawHtml, metadata }: ScrapedPage) =>
 export const classifyScrape = (result: ScrapeResult, kind: PageKind | "map"): ScrapeOutcome => {
   if ("error" in result) {
     const { status } = result.error;
-    // No response, a timeout, or every engine failing (Firecrawl's 500) means the scraper
-    // did not get past the site. Any other API status is a request the page cannot fix.
-    if (status === null || status === 408 || status >= 500) return "blocked";
+    // No response, a timeout, or every engine failing (Firecrawl's 500) says nothing about
+    // the site: the instance may be down. Any other API status is a request the page cannot fix.
+    if (status === null || status === 408 || status >= 500) return "unreachable";
     return outcomeOfStatus(status) ?? "failed";
   }
   if (kind === "map") return "ok";

@@ -62,10 +62,11 @@ describe("classifyScrape", () => {
   });
 
   test.each<[number | null, ScrapeOutcome]>([
-    [null, "blocked"],
-    [408, "blocked"],
-    [500, "blocked"],
-    [503, "blocked"],
+    // The instance gave no answer about the page, so the site is not to blame.
+    [null, "unreachable"],
+    [408, "unreachable"],
+    [500, "unreachable"],
+    [503, "unreachable"],
     [403, "blocked"],
     [404, "gone"],
     [400, "failed"],
