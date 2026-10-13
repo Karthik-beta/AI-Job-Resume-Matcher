@@ -189,11 +189,11 @@ export function useSectionSave({
     setPending(true);
     try {
       const saved = await settingsSaves(async () => {
-        const fresh = await queryClient.fetchQuery({
-          queryKey: editableSettingsKey,
-          queryFn: fetchEditableSettings,
-          staleTime: 0,
-        });
+        // Read the settings directly: fetchQuery would join a background refetch that may have
+        // started before the previous save's PUT. Cancel that refetch so it can't overwrite the
+        // cache with settings from before this save.
+        await queryClient.cancelQueries({ queryKey: editableSettingsKey });
+        const fresh = await fetchEditableSettings();
         const value = check(fresh, input);
         if (!value) return null;
         const body = await api("/settings", { method: "PUT", body: JSON.stringify(value) });
