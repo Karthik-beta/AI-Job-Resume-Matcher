@@ -29,6 +29,7 @@ import { TitleTriage } from "../src/matching/triage";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
+import { interruptedReason } from "../src/runs/recover-run";
 
 const listing = (url: string, locations: string[] = [], title = `Job ${url}`): Listing => ({
   title,
@@ -771,5 +772,39 @@ describe("process run", () => {
 
     expect(scraped).toEqual([]);
     expect(run).toMatchObject({ status: "STOPPED", finishedAt: null });
+  });
+
+  it("does nothing when a completed run is delivered again", async () => {
+    const { run: first } = await runWith(await startRun(), {});
+    const { run, scraped } = await runWith(first.id, {});
+
+    expect(scraped).toEqual([]);
+    expect(run).toEqual(first);
+  });
+
+  it("ends a run delivered again while RUNNING, keeping its saved results", async () => {
+    const runId = await startRun();
+    // The worker that claimed the run stopped after saving one result.
+    await prisma.run.update({ where: { id: runId }, data: { status: "RUNNING", checked: 1 } });
+    await prisma.jobResult.create({
+      data: {
+        runId,
+        userId,
+        contextKey: "interrupted",
+        jobUrl: jobUrl("1"),
+        title: "Job 1",
+        company: "Example",
+        locations: [],
+        isMatch: false,
+        reason: "Missing skills",
+      },
+    });
+    const { run, scraped, evaluated } = await runWith(runId, {});
+
+    expect(scraped).toEqual([]);
+    expect(evaluated).toEqual([]);
+    expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, checked: 1 });
+    expect(run.finishedAt).not.toBeNull();
+    expect(await prisma.jobResult.count({ where: { runId } })).toBe(1);
   });
 });

@@ -32,6 +32,7 @@ import type { HostLimiter } from "../matching/sources/http";
 import { listingKind } from "../matching/sources/search";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
+import { failActiveRun } from "./recover-run";
 import { requirementsOf, titleFiltersOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
@@ -112,9 +113,10 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
   const finish = (status: "COMPLETED" | "STOPPED" | "FAILED", stopReason: string | null = null) =>
     Effect.gen(function* () {
       const cloudCredits = yield* credits.spent;
+      // Only a running run is ended, so a run already ended by recovery keeps its reason.
       yield* query(() =>
-        prisma.run.update({
-          where: { id: runId },
+        prisma.run.updateMany({
+          where: { id: runId, status: "RUNNING" },
           data: { status, stopReason, cloudCredits, finishedAt: new Date() },
         }),
       );
@@ -128,7 +130,13 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
         data: { status: "RUNNING" },
       }),
     );
-    if (claimed.count === 0) return;
+    if (claimed.count === 0) {
+      // BullMQ delivers a run's job again only when the worker running it stopped (a stalled
+      // job), so a run still RUNNING here was interrupted. It ends instead of resuming, which
+      // could analyse the same jobs twice; a completed or stopped run stays as it is.
+      yield* query(() => failActiveRun(prisma, runId));
+      return;
+    }
 
     const run = yield* query(() => prisma.run.findUniqueOrThrow({ where: { id: runId } }));
     const { userId } = run;
