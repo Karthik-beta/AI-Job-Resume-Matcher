@@ -108,3 +108,29 @@ test("a stale session cookie is cleared instead of looping", async ({ page, cont
   await page.reload();
   await expect(page).toHaveURL("/sign-in?next=%2Fhome");
 });
+
+test("switching accounts in another tab resets the open pages", async ({ page, context }) => {
+  await signUp(page);
+  await page.goto("/settings");
+  const resumeUrl = page.getByLabel("Resume URL");
+  await resumeUrl.fill("https://example.com/first-user.pdf");
+  await page.getByRole("button", { name: "Save preferences" }).click();
+  await expect(page.getByText("Preferences saved")).toBeVisible();
+
+  // Another tab signs in as someone else. The shared cookie changes, but this tab is never told
+  // the first user signed out.
+  const response = await context.request.post("/api/auth/sign-up/email", {
+    headers: { origin: new URL(page.url()).origin },
+    data: { name: "Second User", email: `e2e-${crypto.randomUUID()}@example.com`, password },
+  });
+  expect(response.ok()).toBe(true);
+
+  // Coming back to the tab checks the session again (at most every 5 seconds).
+  await expect(async () => {
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(page.getByRole("button", { name: "Account menu for Second User" })).toBeVisible({
+      timeout: 1_000,
+    });
+  }).toPass({ timeout: 15_000 });
+  await expect(resumeUrl).toHaveValue("");
+});

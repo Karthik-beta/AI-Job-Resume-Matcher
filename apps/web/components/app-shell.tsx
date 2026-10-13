@@ -4,7 +4,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { LogOut, MenuIcon, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, type ReactNode, Suspense, use, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  Fragment,
+  type ReactNode,
+  Suspense,
+  use,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { Logo } from "@/components/logo";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -69,6 +78,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Only a 401 means signed out. A failed check (API down, network, timeout) leaves the cookie
   // alone: the session may be perfectly valid.
   const checkFailed = !session && !isPending && error !== null && error.status !== 401;
+  // The user the pages were rendered for. Another tab can sign in as someone else, and the
+  // session can then change from one user to another without ever being empty.
+  const userId = session?.user.id ?? null;
+  const [shownUserId, setShownUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (userId === null || userId === shownUserId) return;
+    // The previous user's cached data and form state must not reach the new user's pages, or a
+    // save could write it to the new account.
+    if (shownUserId !== null) queryClient.clear();
+    setShownUserId(userId);
+  }, [userId, shownUserId, queryClient]);
 
   useEffect(() => {
     // Signing out empties the session too; that navigates to `/` instead of the sign-in page.
@@ -92,7 +113,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [isPending, session, checkFailed, clearFailed, signingOut, router, queryClient]);
 
   const gate: SessionGate = {
-    status: session ? "signed-in" : checkFailed || clearFailed ? "failed" : "loading",
+    status:
+      session && userId === shownUserId
+        ? "signed-in"
+        : !session && (checkFailed || clearFailed)
+          ? "failed"
+          : "loading",
     retry: () => {
       if (clearFailed) setClearFailed(false);
       else void refetch();
@@ -137,7 +163,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       {/* The page segment always renders, so Next can validate it; `AppPage` gates its content. */}
-      <SessionGateContext value={gate}>{children}</SessionGateContext>
+      <SessionGateContext value={gate}>
+        {/* Remounted for each user, so no page keeps state from the previous one. */}
+        <Fragment key={shownUserId}>{children}</Fragment>
+      </SessionGateContext>
     </div>
   );
 }
