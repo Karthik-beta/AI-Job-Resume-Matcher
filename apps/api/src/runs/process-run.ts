@@ -79,9 +79,11 @@ const unsuitable: Verdict = {
   skipped: null,
 };
 
+// Only the page's structured data is checked, so a page may state in its text what is missing.
 const unknownDetails: Verdict = {
   isMatch: false,
-  reason: "Its location or experience isn't stated, and you excluded jobs with unknown details",
+  reason:
+    "The job page's structured data doesn't state its location or experience, and you excluded jobs with unknown details",
   skipped: null,
 };
 

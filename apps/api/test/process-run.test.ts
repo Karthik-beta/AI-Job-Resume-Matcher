@@ -540,7 +540,7 @@ describe("process run", () => {
           jobUrl: jobUrl("12"),
           isMatch: false,
           reason:
-            "Its location or experience isn't stated, and you excluded jobs with unknown details",
+            "The job page's structured data doesn't state its location or experience, and you excluded jobs with unknown details",
           locations: [],
         },
         {
