@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Job Matcher: match job listings to your resume</title>
+    <meta
+      name="description"
+      content="Job Matcher is a free, self-hosted tool that reads the job boards you follow and checks every new listing against your resume with an LLM, giving a reason for each verdict."
+    />
+    <link rel="canonical" href="https://karthik-beta.github.io/AI-Job-Resume-Matcher/" />
+    <meta name="theme-color" content="#eef1ec" />
+    <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Job Matcher" />
+    <meta property="og:title" content="Job Matcher: match job listings to your resume" />
+    <meta
+      property="og:description"
+      content="Reads the job boards you follow, filters by location and experience, and keeps the jobs worth applying to. Self-hosted and open source."
+    />
+    <meta property="og:url" content="https://karthik-beta.github.io/AI-Job-Resume-Matcher/" />
+    <meta
+      property="og:image"
+      content="https://karthik-beta.github.io/AI-Job-Resume-Matcher/assets/social-preview.png"
+    />
+    <meta property="og:image:width" content="1280" />
+    <meta property="og:image:height" content="640" />
+    <meta property="og:image:alt" content="Job Matcher: match job listings to your resume with AI" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <script>
+      // Set before first paint, so the example run starts unmarked instead of flashing its result.
+      document.documentElement.classList.add("js");
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        document.documentElement.classList.add("js-play");
+      }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="masthead wrap">
+      <a class="brand" href="./">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="#1c2a23" />
+          <path d="M7.5 22h17" stroke="#f3de6e" stroke-width="5" stroke-linecap="round" />
+          <path
+            d="M9 15.5l5 5 9.5-11"
+            fill="none"
+            stroke="#1c2a23"
+            stroke-width="6.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <path
+            d="M9 15.5l5 5 9.5-11"
+            fill="none"
+            stroke="#f4f6f1"
+            stroke-width="3.5"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        Job Matcher
+      </a>
+      <nav class="masthead-nav" aria-label="Project">
+        <a
+          class="hide-small"
+          href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/docs/self-hosting.md"
+          >Self-hosting guide</a
+        >
+        <a class="button button-outline" href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher">
+          <svg class="icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path
+              d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <h1 id="hero-title">Every new job listing, read against your resume.</h1>
+        <p class="lead">
+          Job Matcher watches the job boards you follow, drops the listings outside your experience
+          and cities, and has an LLM check the rest against your resume. You get a short list, with
+          the reason behind every verdict.
+        </p>
+
+        <div class="installer" data-installer>
+          <fieldset class="os-switch">
+            <legend class="vh">Your system</legend>
+            <button type="button" data-os="unix" aria-pressed="true">macOS, Linux, WSL</button>
+            <button type="button" data-os="windows" aria-pressed="false">Windows</button>
+          </fieldset>
+          <div class="command" data-command="unix">
+            <span class="command-os">macOS, Linux, WSL</span>
+            <pre><code>curl -fsSL https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.sh | sh</code></pre>
+            <button type="button" class="copy" data-copy>Copy</button>
+          </div>
+          <div class="command" data-command="windows">
+            <span class="command-os">Windows PowerShell</span>
+            <pre><code>irm https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.ps1 | iex</code></pre>
+            <button type="button" class="copy" data-copy>Copy</button>
+          </div>
+        </div>
+        <p class="fineprint">
+          Free and open source under the MIT license. It runs in Docker on your own computer, and
+          its demo mode needs no API keys.
+        </p>
+      </section>
+
+      <section class="run wrap" aria-labelledby="run-title" data-run>
+        <div class="sheet">
+          <div class="sheet-head">
+            <h2 id="run-title" class="sheet-title">Example run</h2>
+            <dl class="counts">
+              <div>
+                <dt>Found</dt>
+                <dd data-count="found">32</dd>
+              </div>
+              <div>
+                <dt>Eligible</dt>
+                <dd data-count="eligible">7</dd>
+              </div>
+              <div>
+                <dt>Checked</dt>
+                <dd data-count="checked">5</dd>
+              </div>
+              <div>
+                <dt>Matches</dt>
+                <dd data-count="matches">2</dd>
+              </div>
+            </dl>
+            <button type="button" class="button button-outline replay" data-replay>
+              Run again
+            </button>
+          </div>
+
+          <ol class="wall" aria-label="Listings found in this run">
+            <li><span class="t" data-v="f">Senior Backend Engineer<span class="vh">, dropped: Senior is in the title</span></span></li>
+            <li><button type="button" class="t" data-v="m" aria-pressed="true" data-company="Northwind Labs, Bengaluru" data-reason="Asks for 2–4 years with Node.js and PostgreSQL. The resume shows three years building NestJS services on Postgres.">Backend Engineer, Payments<span class="vh">, match</span></button></li>
+            <li><span class="t" data-v="f">Frontend Intern<span class="vh">, dropped: Intern is in the title</span></span></li>
+            <li><span class="t" data-v="f">Staff Software Engineer<span class="vh">, dropped: asks for 10 or more years</span></span></li>
+            <li><button type="button" class="t" data-v="n" aria-pressed="false" data-company="Tidepool Systems, Bengaluru" data-reason="Requires 3+ years running Kubernetes in production. The resume shows one year.">Platform Engineer<span class="vh">, no match</span></button></li>
+            <li><span class="t" data-v="f">Data Engineer II<span class="vh">, dropped: based in Gurugram</span></span></li>
+            <li><span class="t" data-v="f">Product Designer<span class="vh">, dropped: the title has neither Engineer nor Developer</span></span></li>
+            <li><span class="t" data-v="f">Engineering Manager, Growth<span class="vh">, dropped: asks for 8 or more years</span></span></li>
+            <li><span class="t" data-v="w">Software Engineer, Integrations<span class="vh">, eligible, waits for the next run</span></span></li>
+            <li><span class="t" data-v="f">Senior Site Reliability Engineer<span class="vh">, dropped: Senior is in the title</span></span></li>
+            <li><span class="t" data-v="f">iOS Engineer<span class="vh">, dropped: based in London</span></span></li>
+            <li><button type="button" class="t" data-v="n" aria-pressed="false" data-company="Copperline, Remote" data-reason="Built on Elasticsearch and Go. Neither appears on the resume.">Backend Developer, Search<span class="vh">, no match</span></button></li>
+            <li><span class="t" data-v="f">QA Automation Engineer<span class="vh">, dropped: based in Pune</span></span></li>
+            <li><button type="button" class="t" data-v="m" aria-pressed="false" data-company="Fieldnote, Remote" data-reason="Wants React and TypeScript with some API design. Both appear in the last two roles.">Full Stack Developer<span class="vh">, match</span></button></li>
+            <li><span class="t" data-v="f">Software Engineer, Infrastructure<span class="vh">, dropped: based in Berlin</span></span></li>
+            <li><span class="t" data-v="f">Principal Engineer<span class="vh">, dropped: asks for 12 or more years</span></span></li>
+            <li><span class="t" data-v="f">Android Developer<span class="vh">, dropped: based in Hyderabad</span></span></li>
+            <li><span class="t" data-v="f">Data Analyst<span class="vh">, dropped: the title has neither Engineer nor Developer</span></span></li>
+            <li><button type="button" class="t" data-v="n" aria-pressed="false" data-company="Larkspur Health, Bengaluru" data-reason="The team writes Java and Spring services. The resume covers TypeScript and Node.js only.">Software Engineer II<span class="vh">, no match</span></button></li>
+            <li><span class="t" data-v="f">Senior Product Manager<span class="vh">, dropped: Senior is in the title</span></span></li>
+            <li><span class="t" data-v="f">Machine Learning Engineer<span class="vh">, dropped: based in Mumbai</span></span></li>
+            <li><span class="t" data-v="w">Software Engineer, Billing<span class="vh">, eligible, waits for the next run</span></span></li>
+            <li><span class="t" data-v="f">DevOps Engineer<span class="vh">, dropped: based in Chennai</span></span></li>
+            <li><span class="t" data-v="f">Technical Writer<span class="vh">, dropped: the title has neither Engineer nor Developer</span></span></li>
+            <li><span class="t" data-v="f">Security Engineer<span class="vh">, dropped: asks for 7 or more years</span></span></li>
+            <li><span class="t" data-v="f">Junior Frontend Developer<span class="vh">, dropped: asks for under a year</span></span></li>
+            <li><span class="t" data-v="f">Solutions Engineer<span class="vh">, dropped: based in Singapore</span></span></li>
+            <li><span class="t" data-v="f">Graduate Software Engineer<span class="vh">, dropped: asks for under a year</span></span></li>
+            <li><span class="t" data-v="f">Database Reliability Engineer<span class="vh">, dropped: based in Gurugram</span></span></li>
+            <li><span class="t" data-v="f">Customer Support Engineer<span class="vh">, dropped: based in Pune</span></span></li>
+            <li><span class="t" data-v="f">Lead Backend Engineer<span class="vh">, dropped: asks for 8 or more years</span></span></li>
+            <li><span class="t" data-v="f">Mobile Engineer, React Native<span class="vh">, dropped: based in Hyderabad</span></span></li>
+          </ol>
+
+          <div class="sheet-foot">
+            <div class="verdict" aria-live="polite">
+              <span class="badge badge-match" data-verdict-badge>Match</span>
+              <p class="verdict-title" data-verdict-title>Backend Engineer, Payments</p>
+              <p class="verdict-company" data-verdict-company>Northwind Labs, Bengaluru</p>
+              <p class="verdict-reason" data-verdict-reason>
+                Asks for 2–4 years with Node.js and PostgreSQL. The resume shows three years
+                building NestJS services on Postgres.
+              </p>
+            </div>
+            <div class="key">
+              <p>
+                The resume here is a backend engineer’s, with four years of experience. Their
+                filters ask for 2–5 years, Bengaluru or remote, and a title with Engineer or
+                Developer but not Senior or Intern. Choose a checked title to read its verdict.
+              </p>
+              <ul class="key-list">
+                <li><span class="t is-done" data-v="f">Dropped by the filters</span></li>
+                <li><span class="t is-done" data-v="n">No match</span></li>
+                <li><span class="t is-done" data-v="m">Match</span></li>
+                <li><span class="t is-done" data-v="w">Waits for the next run</span></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="steps wrap" id="how-it-works" aria-labelledby="steps-title">
+        <h2 id="steps-title">How a run works</h2>
+        <ol class="step-list">
+          <li class="step">
+            <p class="step-count"><span class="step-num">32</span> found</p>
+            <h3>Read your job boards</h3>
+            <p>
+              Add Greenhouse, Lever, Ashby, SmartRecruiters or Recruitee boards, any careers page,
+              or a search for a role. Boards are read through their public APIs, which costs
+              nothing. Other careers pages are scraped with Firecrawl, and a search finds the past
+              week’s ads on those boards.
+            </p>
+          </li>
+          <li class="step">
+            <p class="step-count"><span class="step-num">7</span> eligible</p>
+            <h3>Filter before reading</h3>
+            <p>
+              Listings outside your years of experience, your cities or your title keywords are
+              dropped before any job page is opened. One quick model request can also rank the
+              remaining titles against your resume, so only likely fits are read.
+            </p>
+          </li>
+          <li class="step">
+            <p class="step-count"><span class="step-num">5</span> checked</p>
+            <h3>Check against your resume</h3>
+            <p>
+              Each job ad goes to an LLM with your resume. It answers Match or No match, with a
+              one-sentence reason you can check. A run checks 5 jobs by default, or up to 20, and
+              the next run picks up where this one stopped.
+            </p>
+          </li>
+          <li class="step">
+            <p class="step-count"><span class="step-num">2</span> matches</p>
+            <h3>Save and notify</h3>
+            <p>
+              Matches go to your list, where you mark them applied. Connect a Discord channel and
+              each match is posted there too. Turn on automatic checks and runs start on their own,
+              as often as every 15 minutes.
+            </p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="shots wrap" aria-labelledby="shots-title">
+        <h2 id="shots-title">The app</h2>
+        <div class="shot-grid">
+          <figure>
+            <div class="shot" style="--crop-x: 80; --crop-w: 710; --crop-h: 880">
+            <img
+              src="assets/analyze.png"
+              width="1280"
+              height="951"
+              loading="lazy"
+              alt="The Analyze page: a completed run that found 3 jobs, checked 2, and marked both as matches with a reason."
+            />
+            </div>
+            <figcaption>
+              Analyze shows every job a run checked, its verdict, and where the job text came from.
+            </figcaption>
+          </figure>
+          <figure>
+            <div class="shot" style="--crop-x: 80; --crop-w: 710; --crop-h: 540">
+            <img
+              src="assets/matches.png"
+              width="1280"
+              height="800"
+              loading="lazy"
+              alt="The Matches page: two pending matches, each with a Mark applied button."
+            />
+            </div>
+            <figcaption>Matches wait in Pending until you mark them applied.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="needs wrap" aria-labelledby="needs-title">
+        <h2 id="needs-title">What it takes to run</h2>
+        <div class="needs-grid">
+          <div>
+            <h3>A computer with Docker</h3>
+            <p>
+              Docker Desktop on Windows, macOS or Linux, or Docker on a Raspberry Pi 4 or 5. About
+              2 GB of free memory and 3 GB of disk.
+            </p>
+          </div>
+          <div>
+            <h3>Two API keys, or none</h3>
+            <p>
+              Demo mode needs no keys and runs the whole app on built-in sample pages. Live mode
+              needs an <a href="https://openrouter.ai/keys">OpenRouter</a> key for the checks, which
+              cost a fraction of a cent per job, and a
+              <a href="https://www.firecrawl.dev/app/api-keys">Firecrawl</a> key for scraping. Its
+              free plan covers 1,000 pages a month, and runs keep a reserve so a schedule can’t
+              spend the month early.
+            </p>
+          </div>
+          <div>
+            <h3>Where your data goes</h3>
+            <p>
+              Your resume, sources and matches are stored in a Postgres database on your computer,
+              and PDF resumes are read locally. In live mode, the resume text and each job ad are
+              sent to OpenRouter for the check, and job pages are fetched through Firecrawl.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="install" aria-labelledby="install-title">
+        <div class="wrap band-inner">
+          <div class="band-copy">
+            <h2 id="install-title">Run it on your computer</h2>
+            <p>
+              The installer checks for Docker, downloads Job Matcher into
+              <code>~/job-matcher</code>, generates its secrets and asks for the two keys. Press
+              Enter at both prompts for demo mode. It never asks for admin rights, and running it
+              again upgrades the app and keeps your data.
+            </p>
+            <p>
+              You can <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/install.sh">read the script</a>
+              first, or follow the
+              <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/docs/self-hosting.md">self-hosting guide</a>
+              to run each command yourself.
+            </p>
+          </div>
+          <div class="band-action">
+            <div class="installer installer-dark" data-installer>
+              <fieldset class="os-switch">
+                <legend class="vh">Your system</legend>
+                <button type="button" data-os="unix" aria-pressed="true">macOS, Linux, WSL</button>
+                <button type="button" data-os="windows" aria-pressed="false">Windows</button>
+              </fieldset>
+              <div class="command" data-command="unix">
+                <span class="command-os">macOS, Linux, WSL</span>
+                <pre><code>curl -fsSL https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.sh | sh</code></pre>
+                <button type="button" class="copy" data-copy>Copy</button>
+              </div>
+              <div class="command" data-command="windows">
+                <span class="command-os">Windows PowerShell</span>
+                <pre><code>irm https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.ps1 | iex</code></pre>
+                <button type="button" class="copy" data-copy>Copy</button>
+              </div>
+            </div>
+            <ol class="first-run">
+              <li>Open <strong>http://localhost:8080</strong> and create an account.</li>
+              <li>In Settings, add a careers page and a link to your resume.</li>
+              <li>Press Analyze.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="built wrap" aria-labelledby="built-title">
+        <div class="built-intro">
+          <h2 id="built-title">How it’s built</h2>
+          <p>
+            A TypeScript monorepo on Bun: Next.js and React for the web app, NestJS and Effect for
+            the API and run worker, PostgreSQL with Prisma, and Redis with BullMQ.
+          </p>
+          <p>
+            <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher#architecture">Read the architecture notes</a>
+          </p>
+        </div>
+        <dl class="built-list">
+          <div>
+            <dt>Failures are typed</dt>
+            <dd>
+              The matching pipeline is written with Effect, and every failure is a
+              <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/apps/api/src/matching/errors.ts">tagged error</a>.
+              A rejected API key stops the run, a blocked page fails only that job, and a Discord
+              outage is only logged.
+            </dd>
+          </div>
+          <div>
+            <dt>Runs can’t double up</dt>
+            <dd>
+              The API only queues a run. The run id doubles as the BullMQ job id, and a per-user
+              Postgres
+              <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/apps/api/src/runs/create-run.ts">advisory lock</a>
+              stops two runs from overlapping.
+            </dd>
+          </div>
+          <div>
+            <dt>Scraping keeps to a budget</dt>
+            <dd>
+              Each run reads the Firecrawl plan’s remaining credits and
+              <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/apps/api/src/matching/credit-guard.ts">keeps a reserve</a>.
+              Scheduled runs share an even daily allowance.
+            </dd>
+          </div>
+          <div>
+            <dt>No job is paid for twice</dt>
+            <dd>
+              Pages are cached in Postgres, and verdicts are keyed by a
+              <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/apps/api/src/matching/context-key.ts">hash</a>
+              of the resume, sources, model and requirements, so a rerun skips work already done.
+            </dd>
+          </div>
+          <div>
+            <dt>Tested before it merges</dt>
+            <dd>
+              Over 50 test files with a 90% per-file line coverage gate, Playwright tests on fake
+              providers, and CI that boots the full Compose stack and runs the installer against
+              it.
+            </dd>
+          </div>
+        </dl>
+      </section>
+    </main>
+
+    <footer class="footer wrap">
+      <p>Job Matcher is free software under the MIT license, made by Karthik P.</p>
+      <ul class="footer-links">
+        <li><a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher">Source on GitHub</a></li>
+        <li>
+          <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/docs/self-hosting.md">Self-hosting guide</a>
+        </li>
+        <li>
+          <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/blob/master/docs/configuration.md">Configuration</a>
+        </li>
+        <li>
+          <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/releases">Releases</a>
+        </li>
+      </ul>
+    </footer>
+  </body>
+</html>
