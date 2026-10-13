@@ -49,6 +49,12 @@ export const createRun = (
         }),
       },
     });
+    // A run needs a resume and a source, so the first one finishes onboarding's required steps.
+    // Guarded like OnboardingService.mark, so a completion committed meanwhile keeps its time.
+    await tx.settings.updateMany({
+      where: { userId, onboardingCompletedAt: null },
+      data: { onboardingCompletedAt: run.createdAt },
+    });
     return { _tag: "Created", run };
   });
 };

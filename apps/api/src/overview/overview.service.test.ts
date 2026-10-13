@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { defaultSettings } from "@job-matcher/shared";
 import type { Queue } from "bullmq";
+import type { Settings } from "../generated/prisma/client";
 import type { PrismaService } from "../prisma/prisma.service";
 import { estimateNextRun, OverviewService } from "./overview.service";
 
@@ -7,8 +9,20 @@ const userId = "user-1";
 const now = new Date("2026-10-13T12:00:00.000Z");
 const minute = 60_000;
 
+// A saved settings row: the defaults, with the given changes.
+const settingsRow = (changes: Partial<Settings>): Settings => ({
+  userId,
+  ...defaultSettings,
+  locations: [],
+  titleInclude: [],
+  titleExclude: [],
+  onboardingCompletedAt: null,
+  onboardingDismissedAt: null,
+  ...changes,
+});
+
 interface Rows {
-  readonly settings?: { resumeUrl: string | null; scheduleMinutes: number | null } | null;
+  readonly settings?: Settings | null;
   readonly sourceCount?: number;
   readonly latestRun?: object | null;
   readonly activeRun?: { id: string; status: string } | null;
@@ -66,6 +80,12 @@ describe("OverviewService", () => {
       activeRun: null,
       pendingMatches: 0,
       nextScheduledRunAt: null,
+      onboarding: {
+        steps: { resume: false, preferences: false, source: false, firstRun: false },
+        nextStep: "resume",
+        completedAt: null,
+        dismissedAt: null,
+      },
     });
     expect(wheres.length).toBe(5);
     expect(wheres.every((where) => where.userId === userId)).toBe(true);
@@ -73,7 +93,10 @@ describe("OverviewService", () => {
 
   test("reports the active run and the latest run's matches", async () => {
     const { prisma, runQueries } = fakePrisma({
-      settings: { resumeUrl: "https://example.com/cv.pdf", scheduleMinutes: null },
+      settings: settingsRow({
+        resumeUrl: "https://example.com/cv.pdf",
+        onboardingCompletedAt: new Date("2026-10-13T11:59:00.000Z"),
+      }),
       sourceCount: 3,
       latestRun: {
         id: "run-2",
@@ -88,7 +111,7 @@ describe("OverviewService", () => {
     const overview = await new OverviewService(prisma, noScheduler).get(userId, now);
 
     expect(overview).toEqual({
-      setup: { hasResume: true, sourceCount: 3, hasPreferences: true, hasRun: true },
+      setup: { hasResume: true, sourceCount: 3, hasPreferences: false, hasRun: true },
       latestRun: {
         id: "run-2",
         status: "RUNNING",
@@ -99,6 +122,12 @@ describe("OverviewService", () => {
       activeRun: { id: "run-2", status: "RUNNING" },
       pendingMatches: 4,
       nextScheduledRunAt: null,
+      onboarding: {
+        steps: { resume: true, preferences: false, source: true, firstRun: true },
+        nextStep: null,
+        completedAt: "2026-10-13T11:59:00.000Z",
+        dismissedAt: null,
+      },
     });
     const activeQuery = runQueries.find(({ where }) => where.status);
     expect(activeQuery?.orderBy).toEqual({ createdAt: "desc" });
@@ -106,7 +135,7 @@ describe("OverviewService", () => {
 
   test("reports a queued run with its finished latest run", async () => {
     const { prisma } = fakePrisma({
-      settings: { resumeUrl: null, scheduleMinutes: null },
+      settings: settingsRow({ onboardingDismissedAt: new Date("2026-10-12T09:00:00.000Z") }),
       latestRun: {
         id: "run-1",
         status: "COMPLETED",
@@ -118,13 +147,19 @@ describe("OverviewService", () => {
     });
     const overview = await new OverviewService(prisma, noScheduler).get(userId, now);
 
-    expect(overview.setup).toMatchObject({ hasResume: false, hasPreferences: true });
+    // Dismissing creates a row of defaults, which is not a preference.
+    expect(overview.setup).toMatchObject({ hasResume: false, hasPreferences: false });
     expect(overview.latestRun).toMatchObject({ finishedAt: "2026-10-12T10:03:00.000Z" });
     expect(overview.activeRun).toEqual({ id: "run-3", status: "QUEUED" });
+    expect(overview.onboarding).toMatchObject({
+      steps: { resume: false, preferences: false, source: false, firstRun: true },
+      nextStep: "resume",
+      dismissedAt: "2026-10-12T09:00:00.000Z",
+    });
   });
 
   describe("with scheduling enabled", () => {
-    const settings = { resumeUrl: "https://example.com/cv.pdf", scheduleMinutes: 60 };
+    const settings = settingsRow({ resumeUrl: "https://example.com/cv.pdf", scheduleMinutes: 60 });
     const sourceCount = 2;
     const lastScheduledRun = { createdAt: new Date("2026-10-13T09:30:00.000Z") };
 

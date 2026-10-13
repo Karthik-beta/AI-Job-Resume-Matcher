@@ -5,6 +5,8 @@ import { CacheService } from "./cache/cache.service";
 import { HealthController } from "./health/health.controller";
 import { MatchesController } from "./matches/matches.controller";
 import { MatchesService } from "./matches/matches.service";
+import { OnboardingController } from "./onboarding/onboarding.controller";
+import { OnboardingService } from "./onboarding/onboarding.service";
 import { OverviewController } from "./overview/overview.controller";
 import { OverviewService } from "./overview/overview.service";
 import { PrismaModule } from "./prisma/prisma.module";
@@ -28,6 +30,7 @@ import { SourcesService } from "./sources/sources.service";
     MatchesController,
     CacheController,
     OverviewController,
+    OnboardingController,
   ],
   providers: [
     SourcesService,
@@ -36,6 +39,7 @@ import { SourcesService } from "./sources/sources.service";
     MatchesService,
     CacheService,
     OverviewService,
+    OnboardingService,
     MatchAlerts,
   ],
 })

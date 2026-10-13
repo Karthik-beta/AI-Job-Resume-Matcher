@@ -6,6 +6,7 @@ import { type ReactNode, useEffect } from "react";
 import { toast } from "sonner";
 import { AppPage } from "@/components/app-page";
 import { plannedJobs, statusLabels } from "@/components/run-card";
+import { AllSetCard, SetupChecklist, useAllSet } from "@/components/setup-checklist";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,8 +24,12 @@ const setupSteps: {
   href: string;
   missing: (setup: Overview["setup"]) => boolean;
 }[] = [
-  { label: "Add your resume", href: "/settings", missing: (setup) => !setup.hasResume },
-  { label: "Add a job source", href: "/settings", missing: (setup) => setup.sourceCount === 0 },
+  { label: "Add your resume", href: "/settings#resume", missing: (setup) => !setup.hasResume },
+  {
+    label: "Add a job source",
+    href: "/settings#sources",
+    missing: (setup) => setup.sourceCount === 0,
+  },
 ];
 
 const scheduleHref = "/settings#schedule";
@@ -41,6 +46,8 @@ export function HomeView() {
 
 function Home() {
   const overview = useOverview();
+  const allSet = useAllSet(overview.data?.onboarding);
+  const start = useStartRun();
 
   if (!overview.data) {
     if (overview.isError) {
@@ -60,7 +67,9 @@ function Home() {
     return <HomeSkeleton />;
   }
 
-  const { setup, activeRun, latestRun, pendingMatches, nextScheduledRunAt } = overview.data;
+  const { setup, activeRun, latestRun, pendingMatches, nextScheduledRunAt, onboarding } =
+    overview.data;
+  const showChecklist = onboarding.completedAt === null && onboarding.dismissedAt === null;
   const missing = setupSteps.filter((step) => step.missing(setup));
   // While a run is active the primary card shows it, so the latest run card would repeat it.
   const showLatest = latestRun !== null && latestRun.id !== activeRun?.id;
@@ -69,10 +78,18 @@ function Home() {
     <div className="flex flex-col gap-4">
       {activeRun ? (
         <ActiveRunCard runId={activeRun.id} />
+      ) : showChecklist ? (
+        <SetupChecklist
+          onboarding={onboarding}
+          starting={start.isPending}
+          onStartRun={() => start.mutate()}
+        />
+      ) : allSet.show ? (
+        <AllSetCard onClose={allSet.acknowledge} />
       ) : missing.length > 0 ? (
         <SetupCard missing={missing} />
       ) : (
-        <StartRunCard firstRun={!setup.hasRun} />
+        <StartRunCard firstRun={!setup.hasRun} start={start} />
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         <PendingMatchesCard count={pendingMatches} />
@@ -176,15 +193,15 @@ function ActiveRunCard({ runId }: { runId: string }) {
   );
 }
 
-function StartRunCard({ firstRun }: { firstRun: boolean }) {
+// Starts a run of every saved source, as Analyze does when nothing else is picked.
+function useStartRun() {
   const queryClient = useQueryClient();
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: overviewKey });
     void queryClient.invalidateQueries({ queryKey: ["runs"], exact: true });
   };
 
-  // Runs every saved source, as Analyze does when nothing else is picked.
-  const start = useMutation({
+  return useMutation({
     mutationFn: async () => {
       const sources = await queryClient.fetchQuery({
         queryKey: ["sources"],
@@ -205,7 +222,15 @@ function StartRunCard({ firstRun }: { firstRun: boolean }) {
       if (error instanceof ApiError && error.status === 409) refresh();
     },
   });
+}
 
+function StartRunCard({
+  firstRun,
+  start,
+}: {
+  firstRun: boolean;
+  start: ReturnType<typeof useStartRun>;
+}) {
   return (
     <PrimaryCard
       title={firstRun ? "Ready for your first run" : "Look for new matches"}

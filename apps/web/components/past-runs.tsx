@@ -1,9 +1,27 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { statusLabels } from "@/components/run-card";
-import type { Run } from "@/lib/runs";
+import { fetchRuns, type Run } from "@/lib/runs";
 
+// The runs before the latest one. Analyze shows the latest run above, so the list is left out
+// while that is the only run; with no runs at all it points to the start button above it.
 export function PastRuns({ runs }: { runs: readonly Run[] }) {
-  if (runs.length === 0) return null;
+  // The same list Analyze loaded, read from the cache to tell "no runs" from "only the latest".
+  const all = useQuery({ queryKey: ["runs"], queryFn: fetchRuns });
+
+  if (runs.length === 0) {
+    if (all.data?.length !== 0) return null;
+    return (
+      <section className="flex flex-col gap-4">
+        <h2 className="text-2xl font-bold tracking-tight">Past runs</h2>
+        <p className="border-y py-6 text-muted-foreground">
+          No runs yet. Start your first run with the Analyze button above.
+        </p>
+      </section>
+    );
+  }
 
   return (
     <section className="flex flex-col gap-4">

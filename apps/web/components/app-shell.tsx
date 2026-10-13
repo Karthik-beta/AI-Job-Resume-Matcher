@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, MenuIcon, Settings, UserRound } from "lucide-react";
+import { ListChecks, LogOut, MenuIcon, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -29,6 +29,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authClient } from "@/lib/auth-client";
+import { useRestoreOnboarding } from "@/lib/onboarding";
+import { useOverview } from "@/lib/overview";
 import { authHref } from "@/lib/safe-next";
 
 type NavItem = { href: string; label: string; sections: string[] };
@@ -240,6 +242,23 @@ function UserMenu({
   signingOut: boolean;
   onSignOut: () => void;
 }) {
+  const router = useRouter();
+  const overview = useOverview();
+  const restore = useRestoreOnboarding();
+  // Until onboarding is completed the setup checklist can be brought back to the home page.
+  const showSetupGuide = overview.data?.onboarding.completedAt === null;
+
+  function openSetupGuide() {
+    if (overview.data?.onboarding.dismissedAt === null) {
+      router.push("/home");
+      return;
+    }
+    restore.mutate(undefined, {
+      onSuccess: () => router.push("/home"),
+      onError: () => toast.error("Could not show the setup guide. Try again."),
+    });
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -261,6 +280,12 @@ function UserMenu({
           <Settings />
           Settings
         </DropdownMenuLinkItem>
+        {showSetupGuide && (
+          <DropdownMenuItem disabled={restore.isPending} onClick={openSetupGuide}>
+            <ListChecks />
+            Setup guide
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem disabled={signingOut} onClick={onSignOut}>
           <LogOut />
           Sign out

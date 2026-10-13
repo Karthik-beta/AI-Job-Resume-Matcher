@@ -7,14 +7,17 @@ import {
   sourceKindLabels,
   UpdateJobSource,
 } from "@job-matcher/shared";
+import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
-import { type SubmitEvent, useEffect, useState } from "react";
+import { type SubmitEvent, useEffect, useRef, useState } from "react";
+import { SettingsSection } from "@/components/settings-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
+import { overviewKey } from "@/lib/overview";
 import { validate } from "@/lib/validate";
 
 const Source = Schema.Struct({
@@ -39,8 +42,37 @@ function toSources(value: unknown): Source[] {
 // Search sources are created from a query, so they are not offered here.
 const editableKinds = SourceKind.literals.filter((kind) => kind !== "SEARCH");
 
-export function JobSources() {
+export type JobSource = Source;
+
+export function JobSources({
+  onAdded,
+  onChange,
+  className,
+}: {
+  // Called with each source the user adds.
+  onAdded?: ((source: JobSource) => void) | undefined;
+  // Called with the whole list once it loads and after every change.
+  onChange?: ((sources: readonly JobSource[]) => void) | undefined;
+  className?: string | undefined;
+}) {
+  const queryClient = useQueryClient();
   const [sources, setSources] = useState<Source[] | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (sources !== null) onChangeRef.current?.(sources);
+  }, [sources]);
+
+  // The overview counts sources (setup progress, the home page's next step), so it is
+  // refreshed whenever one is added or removed.
+  const refreshOverview = () => void queryClient.invalidateQueries({ queryKey: overviewKey });
+
+  function add(created: Source) {
+    setSources((current) => [created, ...(current ?? [])]);
+    refreshOverview();
+    onAdded?.(created);
+  }
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -62,7 +94,7 @@ export function JobSources() {
     setPending(true);
     try {
       const created = await api("/sources", { method: "POST", body: JSON.stringify(value) });
-      if (isSource(created)) setSources((current) => [created, ...(current ?? [])]);
+      if (isSource(created)) add(created);
       setUrl("");
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not add the source.");
@@ -75,6 +107,7 @@ export function JobSources() {
     try {
       await api(`/sources/${id}`, { method: "DELETE" });
       setSources((current) => (current ?? []).filter((source) => source.id !== id));
+      refreshOverview();
     } catch {
       setError("Could not delete the source.");
     }
@@ -87,14 +120,12 @@ export function JobSources() {
   }
 
   return (
-    <section className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-bold tracking-tight">Job sources</h2>
-        <p className="text-muted-foreground">
-          Careers pages and job boards to check on each run. Greenhouse, Lever, Ashby,
-          SmartRecruiters and Recruitee boards are read from their public APIs.
-        </p>
-      </div>
+    <SettingsSection
+      id="sources"
+      title="Job sources"
+      description="Careers pages and job boards to check on each run. Greenhouse, Lever, Ashby, SmartRecruiters and Recruitee boards are read from their public APIs."
+      className={className}
+    >
       <form onSubmit={onSubmit} className="flex flex-col gap-2">
         <Field data-invalid={error !== null}>
           <FieldLabel htmlFor="source-url">Careers page URL</FieldLabel>
@@ -113,12 +144,24 @@ export function JobSources() {
           {error && <FieldError>{error}</FieldError>}
         </Field>
       </form>
-      <SearchForm onAdded={(created) => setSources((current) => [created, ...(current ?? [])])} />
+      <SearchForm onAdded={add} />
       {sources !== null &&
         (sources.length === 0 ? (
-          <p className="text-muted-foreground">
-            No job sources yet. Add a careers page URL to start.
-          </p>
+          <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
+            <p className="text-base">No job sources yet. Add a careers page URL to start.</p>
+            <p>Job board links like these are read from the board directly, at no cost:</p>
+            <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              <li>https://boards.greenhouse.io/yourcompany</li>
+              <li>https://jobs.lever.co/yourcompany</li>
+              <li>https://jobs.ashbyhq.com/yourcompany</li>
+              <li>https://jobs.smartrecruiters.com/yourcompany</li>
+              <li>https://yourcompany.recruitee.com</li>
+            </ul>
+            <p>
+              Any other careers page works too. Or search the job boards by role, like “backend
+              engineer typescript”.
+            </p>
+          </div>
         ) : (
           <ul className="divide-y border-y">
             {sources.map((source) => (
@@ -131,7 +174,7 @@ export function JobSources() {
             ))}
           </ul>
         ))}
-    </section>
+    </SettingsSection>
   );
 }
 

@@ -3,6 +3,7 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Injectable } from "@nestjs/common";
 import type { Queue } from "bullmq";
 import { withTimeout } from "../common/timeout";
+import { hasPreferences, onboardingOf } from "../onboarding/onboarding";
 import { PrismaService } from "../prisma/prisma.service";
 import { type RunJob, runsQueue, type ScheduledJob, schedulerId } from "../runs/runs.queue";
 
@@ -30,10 +31,7 @@ export class OverviewService {
 
   async get(userId: string, now = new Date()): Promise<Overview> {
     const [settings, sourceCount, latestRun, activeRun, pendingMatches] = await Promise.all([
-      this.prisma.settings.findUnique({
-        where: { userId },
-        select: { resumeUrl: true, scheduleMinutes: true },
-      }),
+      this.prisma.settings.findUnique({ where: { userId } }),
       this.prisma.jobSource.count({ where: { userId } }),
       this.prisma.run.findFirst({
         where: { userId },
@@ -64,7 +62,7 @@ export class OverviewService {
       setup: {
         hasResume,
         sourceCount,
-        hasPreferences: settings !== null,
+        hasPreferences: hasPreferences(settings),
         hasRun: latestRun !== null,
       },
       latestRun: latestRun && {
@@ -83,6 +81,7 @@ export class OverviewService {
         ? ((await this.nextScheduledRun(userId, scheduleMinutes * 60_000, now))?.toISOString() ??
           null)
         : null,
+      onboarding: onboardingOf(settings, sourceCount, latestRun !== null),
     };
   }
 

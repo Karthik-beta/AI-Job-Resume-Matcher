@@ -1,7 +1,7 @@
 // Where a visitor goes after signing in without a `next` page to return to.
 export const AFTER_SIGN_IN = "/home";
-// Where a new account goes without a `next` page. Becomes "/welcome" once that page exists.
-export const AFTER_SIGN_UP = "/home";
+// Where a new account goes without a `next` page: the setup wizard.
+export const AFTER_SIGN_UP = "/welcome";
 
 const authPages = ["/sign-in", "/sign-up"];
 // Any origin works: it only tells whether a path would leave the site.
