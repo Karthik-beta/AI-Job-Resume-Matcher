@@ -16,13 +16,13 @@ export const failActiveRun = (prisma: PrismaClient, runId: string, reason = inte
 // so it would block every later run. Jobs still active or waiting are left to stall recovery.
 export const recoverOrphanedRuns = async (queue: Queue, prisma: PrismaClient) => {
   const running = await prisma.run.findMany({ where: { status: "RUNNING" }, select: { id: true } });
-  let recovered = 0;
-  for (const { id } of running) {
-    const job = await queue.getJob(id);
-    const state = job ? await job.getState() : "unknown";
-    if (state === "completed" || state === "failed" || state === "unknown") {
-      recovered += (await failActiveRun(prisma, id)).count;
-    }
-  }
-  return recovered;
+  const ended = await Promise.all(
+    running.map(async ({ id }) => {
+      const job = await queue.getJob(id);
+      const state = job ? await job.getState() : "unknown";
+      if (state !== "completed" && state !== "failed" && state !== "unknown") return 0;
+      return (await failActiveRun(prisma, id)).count;
+    }),
+  );
+  return ended.reduce((sum, count) => sum + count, 0);
 };

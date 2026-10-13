@@ -122,6 +122,12 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       );
     });
 
+  // A worker that lost its job while still alive stops once recovery has ended its run, so it
+  // spends no more credits on it and does not run alongside a newer run.
+  const stillRunning = query(() =>
+    prisma.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true } }),
+  ).pipe(Effect.map(({ status }) => status === "RUNNING"));
+
   return Effect.gen(function* () {
     // Only a queued run is claimed, so a duplicate delivery does nothing.
     const claimed = yield* query(() =>
@@ -131,9 +137,10 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       }),
     );
     if (claimed.count === 0) {
-      // BullMQ delivers a run's job again only when the worker running it stopped (a stalled
-      // job), so a run still RUNNING here was interrupted. It ends instead of resuming, which
-      // could analyse the same jobs twice; a completed or stopped run stays as it is.
+      // BullMQ delivers a run's job again only after the worker running it lost its lock (it
+      // stopped, or stalled long enough to be considered stopped), so a run still RUNNING here was
+      // interrupted. It ends instead of resuming, which could analyse the same jobs twice; a
+      // completed or stopped run stays as it is.
       yield* query(() => failActiveRun(prisma, runId));
       return;
     }
@@ -189,6 +196,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
       for (const sourceId of run.sourceIds) {
         const source = sources.find(({ id }) => id === sourceId);
         if (!source) continue;
+        if (!(yield* stillRunning)) return null;
         const read = yield* scrapeSourceListings(userId, source).pipe(Effect.result);
         if (read._tag === "Failure") {
           // A search that cannot run (no cloud credits in hybrid mode, or no SearXNG in local
@@ -227,6 +235,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     // Nothing can be analysed without the resume and listings, so every error here stops the
     // run (except a failing search source, skipped above).
     if (prepared._tag === "Failure") return yield* finish("STOPPED", prepared.failure.message);
+    if (prepared.success === null) return;
     const { resume, listings, kindByUrl } = prepared.success;
     const kindOf = (job: Listing) => kindByUrl.get(canonicalUrl(job.url)) ?? "PAGE";
 
@@ -268,6 +277,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
 
     let ranked: readonly Listing[] = pending;
     if (settings.triageEnabled && pending.length > 0) {
+      if (!(yield* stillRunning)) return;
       const triaged = yield* triageListings(resume.text, pending).pipe(Effect.result);
       if (triaged._tag === "Failure") {
         if (stopsRun(triaged.failure)) return yield* finish("STOPPED", triaged.failure.message);
@@ -316,12 +326,6 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     }
 
     for (const job of selected) {
-      // A worker that lost the job while still alive stops once recovery has ended its run, so the
-      // run's jobs are not analysed twice alongside a newer run.
-      const current = yield* query(() =>
-        prisma.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true } }),
-      );
-      if (current.status !== "RUNNING") return;
       // Kept when the evaluation fails after the page was read.
       let scrapedVia: ScrapeVia | null = null;
       const outcome = yield* jobPageFor(userId, job, kindOf(job)).pipe(
@@ -369,23 +373,28 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
 
       const fields = { runId, ...listing, ...result, matchSaved, scrapedVia };
       const cloudCredits = yield* credits.spent;
-      yield* query(() =>
-        prisma.$transaction([
-          prisma.jobResult.upsert({
-            where: { userId_contextKey_jobUrl: { userId, contextKey, jobUrl: job.url } },
-            create: { userId, contextKey, jobUrl: job.url, ...fields },
-            update: fields,
-          }),
-          prisma.run.update({
-            where: { id: runId },
+      // The result is saved only while the run is RUNNING, so a worker whose run recovery has
+      // ended stops here (see stillRunning).
+      const recorded = yield* query(() =>
+        prisma.$transaction(async (tx) => {
+          const { count } = await tx.run.updateMany({
+            where: { id: runId, status: "RUNNING" },
             data: {
               checked: { increment: 1 },
               failed: { increment: failed ? 1 : 0 },
               cloudCredits,
             },
-          }),
-        ]),
+          });
+          if (count === 0) return false;
+          await tx.jobResult.upsert({
+            where: { userId_contextKey_jobUrl: { userId, contextKey, jobUrl: job.url } },
+            create: { userId, contextKey, jobUrl: job.url, ...fields },
+            update: fields,
+          });
+          return true;
+        }),
       );
+      if (!recorded) return;
 
       // A failed alert is only logged; the match is already saved.
       if (matchSaved && settings.discordWebhookUrl) {

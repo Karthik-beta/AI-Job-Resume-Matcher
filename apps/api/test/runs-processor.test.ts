@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import type { Job, Queue } from "bullmq";
 import { Effect } from "effect";
 import { PrismaService } from "../src/prisma/prisma.service";
@@ -97,44 +97,66 @@ describe("runs processor", () => {
   });
 
   it("processes a run job in the Effect runtime", async () => {
+    // A user without settings, so the run stops as soon as it is processed.
+    const noResume = `test-${crypto.randomUUID()}`;
+    const { id } = await prisma.run.create({
+      data: { userId: noResume, trigger: "MANUAL", contextKey: "test", sourceIds: [] },
+    });
     const effect = new EffectRuntime(prisma);
     await effect.onModuleInit();
     try {
       const { queue } = recordingQueue();
-      const processor = new RunsProcessor(prisma, effect, queue);
-      // A run that does not exist is not claimed, so processing it does nothing.
-      await processor.process({ data: { runId: crypto.randomUUID() } } as Job<RunJob>);
+      await new RunsProcessor(prisma, effect, queue).process({
+        data: { runId: id },
+      } as Job<RunJob>);
+
+      expect(await prisma.run.findUniqueOrThrow({ where: { id } })).toMatchObject({
+        status: "STOPPED",
+        stopReason: "Add a resume URL in settings before starting a run",
+      });
       expect(await effect.runPromise(Effect.succeed("ran"))).toBe("ran");
     } finally {
       await effect.onApplicationShutdown();
+      await prisma.run.deleteMany({ where: { userId: noResume } });
     }
   });
 
-  it("queues a scheduled run on a tick", async () => {
-    const { queue, calls } = recordingQueue();
+  describe("on a schedule tick", () => {
+    // Each tick starts from a schedule that is on and no runs.
+    beforeEach(async () => {
+      await prisma.run.deleteMany({ where: { userId } });
+      await prisma.settings.update({ where: { userId }, data: { scheduleMinutes: 60 } });
+    });
 
-    await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
+    it("queues a scheduled run on a tick", async () => {
+      const { queue, calls } = recordingQueue();
 
-    const run = await prisma.run.findFirstOrThrow({ where: { userId } });
-    expect(run).toMatchObject({ trigger: "SCHEDULED", status: "QUEUED" });
-    expect(calls).toEqual([["add", "run", { runId: run.id }, { jobId: run.id, attempts: 1 }]]);
-  });
+      await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
 
-  it("skips a tick while a run is active", async () => {
-    const { queue, calls } = recordingQueue();
+      const run = await prisma.run.findFirstOrThrow({ where: { userId } });
+      expect(run).toMatchObject({ trigger: "SCHEDULED", status: "QUEUED" });
+      expect(calls).toEqual([["add", "run", { runId: run.id }, { jobId: run.id, attempts: 1 }]]);
+    });
 
-    await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
+    it("skips a tick while a run is active", async () => {
+      await prisma.run.create({
+        data: { userId, trigger: "MANUAL", contextKey: "test", sourceIds: [] },
+      });
+      const { queue, calls } = recordingQueue();
 
-    expect(calls).toEqual([]);
-    expect(await prisma.run.count({ where: { userId } })).toBe(1);
-  });
+      await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
 
-  it("removes the scheduler on a tick once the schedule is turned off", async () => {
-    await prisma.settings.update({ where: { userId }, data: { scheduleMinutes: null } });
-    const { queue, calls } = recordingQueue();
+      expect(calls).toEqual([]);
+      expect(await prisma.run.count({ where: { userId } })).toBe(1);
+    });
 
-    await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
+    it("removes the scheduler on a tick once the schedule is turned off", async () => {
+      await prisma.settings.update({ where: { userId }, data: { scheduleMinutes: null } });
+      const { queue, calls } = recordingQueue();
 
-    expect(calls).toEqual([["remove", `user:${userId}`]]);
+      await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
+
+      expect(calls).toEqual([["remove", `user:${userId}`]]);
+    });
   });
 });

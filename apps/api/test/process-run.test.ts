@@ -123,8 +123,15 @@ describe("process run", () => {
       cloud?: { remainingCredits: number; billingPeriodEnd: string | null };
       // The error every search fails with.
       search?: ScrapeFailed | FirecrawlBlocked;
+      // Ends the run while the resume is read, as recovery does.
+      endRunOnResume?: boolean;
     },
   ) => {
+    const endRun = () =>
+      prisma.run.update({
+        where: { id: runId },
+        data: { status: "FAILED", stopReason: interruptedReason },
+      });
     const triaged: string[][] = [];
     const triage = TitleTriage.of({
       score: ({ jobs }) => {
@@ -161,11 +168,11 @@ describe("process run", () => {
             usage: { via: "cloud", credits: 1 } as const,
           }),
         ),
-      scrapeListingPage: (url, options) =>
+      scrapeListingPage: (url, scrapeOptions) =>
         Effect.map(spendCredit, () => {
           scraped.push(url);
           // Every page embeds a Greenhouse board, which only a first check looks for.
-          const embed = options?.withHtml ? ["https://job-boards.greenhouse.io/acme"] : [];
+          const embed = scrapeOptions?.withHtml ? ["https://job-boards.greenhouse.io/acme"] : [];
           const jobs = (listings[url] ?? []).map((job) => job.url);
           return {
             markdown: `Jobs at ${url}`,
@@ -196,12 +203,9 @@ describe("process run", () => {
         case "auth":
           return Effect.fail(new OpenRouterAuthError({ status: 401, message: "User not found." }));
         case "interrupted":
-          return Effect.promise(() =>
-            prisma.run.update({
-              where: { id: runId },
-              data: { status: "FAILED", stopReason: interruptedReason },
-            }),
-          ).pipe(Effect.as({ isMatch: false, reason: "Missing skills" }));
+          return Effect.promise(endRun).pipe(
+            Effect.as({ isMatch: false, reason: "Missing skills" }),
+          );
       }
     };
     const layer = Layer.mergeAll(
@@ -217,7 +221,10 @@ describe("process run", () => {
       Layer.succeed(
         ResumeSource,
         ResumeSource.of({
-          resolve: () => Effect.succeed({ text: "Resume", hash: options.resumeHash ?? "resume-1" }),
+          resolve: () =>
+            Effect.promise(async () => {
+              if (options.endRunOnResume) await endRun();
+            }).pipe(Effect.as({ text: "Resume", hash: options.resumeHash ?? "resume-1" })),
         }),
       ),
       Layer.succeed(HttpFetch, fakeHttpFetch),
@@ -823,7 +830,19 @@ describe("process run", () => {
     });
 
     expect(evaluated).toEqual([jobUrl("1")]);
-    // The job already checked is saved, and the reason recovery gave is kept.
-    expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, checked: 1 });
+    // The job checked after recovery ended the run is not recorded against it.
+    expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, checked: 0 });
+    expect(await prisma.jobResult.count({ where: { runId: run.id } })).toBe(0);
+  });
+
+  it("stops reading sources once recovery has ended the run", async () => {
+    const { run, scraped, evaluated, triaged } = await runWith(await startRun(), {
+      endRunOnResume: true,
+    });
+
+    expect(scraped).toEqual([]);
+    expect(evaluated).toEqual([]);
+    expect(triaged).toEqual([]);
+    expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, found: 0 });
   });
 });
