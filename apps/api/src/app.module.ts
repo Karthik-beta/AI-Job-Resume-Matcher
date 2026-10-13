@@ -5,6 +5,8 @@ import { CacheService } from "./cache/cache.service";
 import { HealthController } from "./health/health.controller";
 import { MatchesController } from "./matches/matches.controller";
 import { MatchesService } from "./matches/matches.service";
+import { OverviewController } from "./overview/overview.controller";
+import { OverviewService } from "./overview/overview.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { QueueModule } from "./queue/queue.module";
 import { RedisModule } from "./redis/redis.module";
@@ -25,6 +27,7 @@ import { SourcesService } from "./sources/sources.service";
     RunsController,
     MatchesController,
     CacheController,
+    OverviewController,
   ],
   providers: [
     SourcesService,
@@ -32,6 +35,7 @@ import { SourcesService } from "./sources/sources.service";
     RunsService,
     MatchesService,
     CacheService,
+    OverviewService,
     MatchAlerts,
   ],
 })
