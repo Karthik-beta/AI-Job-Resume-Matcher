@@ -14,8 +14,8 @@ test("sign up, analyse a source and mark the match as applied", async ({ page })
   await expect(page.getByText("https://board.example.com/jobs")).toBeVisible();
 
   await page.getByLabel("Resume URL").fill("https://example.com/cv.pdf");
-  await page.getByRole("button", { name: "Save preferences" }).click();
-  await expect(page.getByText("Preferences saved")).toBeVisible();
+  await page.getByRole("button", { name: "Save resume" }).click();
+  await expect(page.getByText("Resume saved")).toBeVisible();
 
   // With no experience set, only the listing without an experience range passes the filters.
   await page.goto("/analyze");
