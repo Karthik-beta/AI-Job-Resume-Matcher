@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Effect, Exit } from "effect";
-import { acceptsJob, type JobFacts, makeRequirements, type Requirements } from "./requirements";
+import {
+  acceptsJob,
+  type JobFacts,
+  makeRequirements,
+  type Requirements,
+  rulesOutJob,
+} from "./requirements";
 
 const requirements: Requirements = {
   experienceYears: 3,
@@ -74,6 +80,19 @@ describe("acceptsJob", () => {
     expect(acceptsJob(strict, job({ locations: ["Bangalore"] }))).toBe(false);
     expect(acceptsJob(strict, job({ experienceMinYears: 3 }))).toBe(false);
     expect(acceptsJob(strict, job({ locations: ["Bangalore"], experienceMinYears: 3 }))).toBe(true);
+  });
+});
+
+describe("rulesOutJob", () => {
+  test("rules out only the details a job states, whether or not unknowns are included", () => {
+    for (const includeUnknown of [true, false]) {
+      const settings = { ...requirements, includeUnknown };
+      expect(rulesOutJob(settings, job())).toBe(false);
+      expect(rulesOutJob(settings, job({ locations: ["Bangalore"] }))).toBe(false);
+      expect(rulesOutJob(settings, job({ locations: ["Mumbai"] }))).toBe(true);
+      expect(rulesOutJob(settings, job({ experienceMinYears: 6 }))).toBe(true);
+      expect(rulesOutJob(settings, job({ experienceMaxYears: 1 }))).toBe(true);
+    }
   });
 });
 

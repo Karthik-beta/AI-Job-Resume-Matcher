@@ -105,3 +105,8 @@ export const acceptsJob = (requirements: Requirements, job: JobFacts): boolean =
   }
   return true;
 };
+
+// Whether the details a job states rule it out. Missing details never do: a listing often leaves
+// out what its job page states, so the page is read before excluding a job for them.
+export const rulesOutJob = (requirements: Requirements, job: JobFacts): boolean =>
+  !acceptsJob({ ...requirements, includeUnknown: true }, job);
