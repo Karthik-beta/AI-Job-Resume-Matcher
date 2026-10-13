@@ -1,5 +1,6 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type SubmitEvent, Suspense, useState } from "react";
@@ -58,6 +59,7 @@ function errorMessage(error: {
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const text = copy[mode];
@@ -78,6 +80,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
         setError(errorMessage(result.error));
         return;
       }
+      // Every new identity passes through here, so nothing cached for a previous user on this
+      // tab can leak, however they left (expired or revoked session, cookie cleared elsewhere).
+      queryClient.clear();
       // Read at submit time, so the form needs no Suspense boundary. `replace` keeps the auth
       // page out of history, so Back doesn't return to the form.
       const next = safeNext(new URLSearchParams(window.location.search).get("next"));

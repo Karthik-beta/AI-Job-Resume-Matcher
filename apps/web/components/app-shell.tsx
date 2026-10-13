@@ -43,36 +43,60 @@ function signInUrl() {
   return authHref("/sign-in", `${window.location.pathname}${window.location.search}`);
 }
 
-const SignedInContext = createContext(false);
+type SessionGate = {
+  // `loading` while the session loads, while redirecting a signed-out visitor and while signing
+  // out; `failed` when the session couldn't be checked, or a stale cookie couldn't be cleared.
+  status: "loading" | "signed-in" | "failed";
+  retry: () => void;
+};
 
-// Whether the guarded page may render. False while the session loads, while redirecting a
-// signed-out visitor and while signing out; `AppPage` shows a skeleton in that time.
-export function useSignedIn() {
-  return use(SignedInContext);
+const SessionGateContext = createContext<SessionGate>({ status: "loading", retry: () => {} });
+
+// Whether the guarded page may render. `AppPage` shows a skeleton while loading and a retry
+// when the session check failed.
+export function useSessionGate() {
+  return use(SessionGateContext);
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { data: session, isPending } = authClient.useSession();
+  const { data: session, isPending, error, refetch } = authClient.useSession();
   const [signingOut, setSigningOut] = useState(false);
+  const [clearFailed, setClearFailed] = useState(false);
   const redirecting = useRef(false);
+  // Only a 401 means signed out. A failed check (API down, network, timeout) leaves the cookie
+  // alone: the session may be perfectly valid.
+  const checkFailed = !session && !isPending && error !== null && error.status !== 401;
 
   useEffect(() => {
     // Signing out empties the session too; that navigates to `/` instead of the sign-in page.
-    if (isPending || session || signingOut || redirecting.current) return;
+    if (isPending || session || checkFailed || clearFailed || signingOut || redirecting.current) {
+      return;
+    }
     redirecting.current = true;
     // The proxy only checks that a session cookie exists. An expired or revoked one is cleared
     // first, or the proxy would send the sign-in page straight back here, and round again.
-    // If that fails the cookie stays, so the page waits on its skeleton rather than loop.
-    void authClient.signOut().then(
-      ({ error }) => {
-        if (error) toast.error("Couldn't reach the server. Reload the page to try again.");
-        else router.replace(signInUrl());
-      },
-      () => toast.error("Couldn't reach the server. Reload the page to try again."),
-    );
-  }, [isPending, session, signingOut, router]);
+    // If that fails the cookie stays, so the page offers a retry rather than loop.
+    const failed = () => {
+      redirecting.current = false;
+      setClearFailed(true);
+    };
+    void authClient.signOut().then(({ error }) => {
+      if (error) return failed();
+      // The next user to sign in on this tab mustn't see this user's cached data.
+      queryClient.clear();
+      router.replace(signInUrl());
+    }, failed);
+  }, [isPending, session, checkFailed, clearFailed, signingOut, router, queryClient]);
+
+  const gate: SessionGate = {
+    status: session ? "signed-in" : checkFailed || clearFailed ? "failed" : "loading",
+    retry: () => {
+      if (clearFailed) setClearFailed(false);
+      else void refetch();
+    },
+  };
 
   async function signOut() {
     setSigningOut(true);
@@ -114,7 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </header>
       {/* The page segment always renders, so Next can validate it; `AppPage` gates its content. */}
-      <SignedInContext value={Boolean(session)}>{children}</SignedInContext>
+      <SessionGateContext value={gate}>{children}</SessionGateContext>
     </div>
   );
 }

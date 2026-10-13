@@ -83,6 +83,12 @@ test("a stale session cookie is cleared instead of looping", async ({ page, cont
     { name: sessionCookie, value: "stale.token", url: "http://localhost:3000" },
   ]);
 
+  // A loop would bounce between /home and the sign-in page, so count the arrivals at /home.
+  let homeVisits = 0;
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame() && new URL(frame.url()).pathname === "/home") homeVisits++;
+  });
+
   // The proxy trusts the cookie and sends `/` to /home; the app finds no session, clears the
   // cookie and settles on the sign-in page.
   await page.goto("/");
@@ -91,6 +97,7 @@ test("a stale session cookie is cleared instead of looping", async ({ page, cont
     .poll(async () => (await context.cookies()).some(({ name }) => name === sessionCookie))
     .toBe(false);
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
-  await page.waitForTimeout(1_000);
+  await page.waitForLoadState("networkidle");
   await expect(page).toHaveURL("/sign-in?next=%2Fhome");
+  expect(homeVisits).toBe(1);
 });
