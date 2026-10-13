@@ -151,6 +151,20 @@ describe("onboarding", () => {
     });
   });
 
+  it("handles concurrent first requests for a user with no settings", async () => {
+    const { agent, id } = await user();
+    const responses = await Promise.all([
+      agent.post("/api/onboarding/complete"),
+      agent.post("/api/onboarding/complete"),
+      agent.post("/api/onboarding/dismiss"),
+      agent.post("/api/onboarding/dismiss"),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200]);
+    const row = await prisma.settings.findUnique({ where: { userId: id } });
+    expect(row?.onboardingCompletedAt).toBeInstanceOf(Date);
+    expect(row?.onboardingDismissedAt).toBeInstanceOf(Date);
+  });
+
   it("dismisses once and restores", async () => {
     const { agent } = await user();
     const dismissed = await agent.post("/api/onboarding/dismiss").expect(200);

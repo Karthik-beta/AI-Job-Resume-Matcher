@@ -104,7 +104,7 @@ describe("overview", () => {
     await addMatch(bobId, "https://jobs.example.com/c", "PENDING");
 
     expect((await alice.get("/api/overview").expect(200)).body).toEqual({
-      setup: { hasResume: true, sourceCount: 1, hasPreferences: true, hasRun: true },
+      setup: { hasResume: true, sourceCount: 1, hasPreferences: false, hasRun: true },
       latestRun: {
         id: finished.id,
         status: "COMPLETED",

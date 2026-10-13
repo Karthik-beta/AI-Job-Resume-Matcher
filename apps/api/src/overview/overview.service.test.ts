@@ -111,7 +111,7 @@ describe("OverviewService", () => {
     const overview = await new OverviewService(prisma, noScheduler).get(userId, now);
 
     expect(overview).toEqual({
-      setup: { hasResume: true, sourceCount: 3, hasPreferences: true, hasRun: true },
+      setup: { hasResume: true, sourceCount: 3, hasPreferences: false, hasRun: true },
       latestRun: {
         id: "run-2",
         status: "RUNNING",
@@ -147,7 +147,8 @@ describe("OverviewService", () => {
     });
     const overview = await new OverviewService(prisma, noScheduler).get(userId, now);
 
-    expect(overview.setup).toMatchObject({ hasResume: false, hasPreferences: true });
+    // Dismissing creates a row of defaults, which is not a preference.
+    expect(overview.setup).toMatchObject({ hasResume: false, hasPreferences: false });
     expect(overview.latestRun).toMatchObject({ finishedAt: "2026-10-12T10:03:00.000Z" });
     expect(overview.activeRun).toEqual({ id: "run-3", status: "QUEUED" });
     expect(overview.onboarding).toMatchObject({

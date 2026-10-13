@@ -229,7 +229,8 @@ export const Overview = Schema.Struct({
   setup: Schema.Struct({
     hasResume: Schema.Boolean,
     sourceCount: NonNegativeInt,
-    // False while no settings have been saved and the defaults are in use.
+    // True once a setting other than the resume differs from the defaults; the same signal as
+    // onboarding.steps.preferences.
     hasPreferences: Schema.Boolean,
     hasRun: Schema.Boolean,
   }),

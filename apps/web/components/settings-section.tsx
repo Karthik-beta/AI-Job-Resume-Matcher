@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, api } from "@/lib/api";
+import { serialQueue } from "@/lib/serial";
 import {
   type EditableSettings,
   editableSettingsKey,
@@ -54,7 +55,7 @@ export function SettingsSection({
           id={headingId}
           tabIndex={-1}
           data-section-heading
-          className="text-2xl font-bold tracking-tight outline-none"
+          className="rounded-sm text-2xl font-bold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {title}
         </h2>
@@ -111,6 +112,7 @@ export function list(data: FormData, name: string) {
 }
 
 type Errors = Partial<Record<string, string>>;
+type FormError = ReactNode;
 
 // PUT /api/settings replaces every setting, so a section's fields are merged into the saved
 // settings. A refused webhook is put back so it fails validation instead of being cleared.
@@ -125,17 +127,34 @@ function merge(base: EditableSettings, input: Partial<UpdateSettings>) {
 // The errors on this section's fields, and one message for any other saved setting that fails.
 function splitErrors(errors: Record<string, string>, fields: readonly (keyof UpdateSettings)[]) {
   const own: Errors = {};
-  let other: string | null = null;
+  let other: FormError = null;
   for (const [key, message] of Object.entries(errors)) {
     if ((fields as readonly string[]).includes(key)) own[key] = message;
     else
       other ??=
         key === "discordWebhookUrl"
-          ? "Your saved Discord webhook URL is not valid. Replace or clear it under Schedule & alerts, then save again."
+          ? webhookError
           : "Another saved setting is not valid. Fix it, then save again.";
   }
   return { own, other };
 }
+
+// The server refuses a non-Discord webhook on every save, so it cannot be kept silently and
+// clearing it would drop the user's data. The link works from any page that shows a section.
+const webhookError = (
+  <>
+    Your saved Discord webhook URL is not valid. Replace or clear it under{" "}
+    <a href="/settings#schedule" className="underline underline-offset-4">
+      Settings, Schedule &amp; alerts
+    </a>
+    , then save again.
+  </>
+);
+
+// Every section save in this tab runs after the previous one finished, so a save's fresh read
+// already holds the fields another section just saved and its full PUT does not revert them.
+// Saves from another tab can still interleave; the last one then wins for the fields it read.
+const settingsSaves = serialQueue();
 
 // Saves only `fields`, keeping every other setting as it is saved now.
 export function useSectionSave({
@@ -151,7 +170,7 @@ export function useSectionSave({
 }) {
   const queryClient = useQueryClient();
   const [errors, setErrors] = useState<Errors>(initialErrors);
-  const [formError, setFormError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<FormError>(null);
   const [pending, setPending] = useState(false);
 
   function check(base: EditableSettings, input: Partial<UpdateSettings>) {
@@ -169,17 +188,21 @@ export function useSectionSave({
     if (loaded && !check(loaded, input)) return;
     setPending(true);
     try {
-      const fresh = await queryClient.fetchQuery({
-        queryKey: editableSettingsKey,
-        queryFn: fetchEditableSettings,
-        staleTime: 0,
+      const saved = await settingsSaves(async () => {
+        const fresh = await queryClient.fetchQuery({
+          queryKey: editableSettingsKey,
+          queryFn: fetchEditableSettings,
+          staleTime: 0,
+        });
+        const value = check(fresh, input);
+        if (!value) return null;
+        const body = await api("/settings", { method: "PUT", body: JSON.stringify(value) });
+        const next = toEditableSettings(body);
+        // Set before the next queued save runs, so nothing reads the settings from before this one.
+        queryClient.setQueryData(editableSettingsKey, next);
+        return next;
       });
-      const value = check(fresh, input);
-      if (!value) return;
-      const saved = toEditableSettings(
-        await api("/settings", { method: "PUT", body: JSON.stringify(value) }),
-      );
-      queryClient.setQueryData(editableSettingsKey, saved);
+      if (!saved) return;
       void queryClient.invalidateQueries({ queryKey: ["settings"], exact: true });
       void queryClient.invalidateQueries({ queryKey: ["overview"] });
       toast.success(savedMessage);
@@ -220,7 +243,7 @@ export function SectionForm({
   children,
 }: {
   onSubmit: (data: FormData) => void;
-  formError: string | null;
+  formError: ReactNode;
   pending: boolean;
   submitLabel: string;
   children: ReactNode;

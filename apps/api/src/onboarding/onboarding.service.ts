@@ -38,13 +38,14 @@ export class OnboardingService {
 
   // Sets a flag once: repeating the request keeps the first time. Settings rows are created
   // lazily, so a user who has saved nothing gets the row a first save of the defaults would make.
+  // The insert skips an existing row (ON CONFLICT DO NOTHING), so concurrent first calls for the
+  // same user cannot fail on the primary key.
   private async mark(userId: string, flag: Flag) {
     const now = new Date();
     await this.prisma.$transaction([
-      this.prisma.settings.upsert({
-        where: { userId },
-        create: { userId, ...settingsData(defaultSettings), [flag]: now },
-        update: {},
+      this.prisma.settings.createMany({
+        data: [{ userId, ...settingsData(defaultSettings), [flag]: now }],
+        skipDuplicates: true,
       }),
       this.prisma.settings.updateMany({ where: { userId, [flag]: null }, data: { [flag]: now } }),
     ]);

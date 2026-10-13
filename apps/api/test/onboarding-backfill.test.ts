@@ -28,7 +28,7 @@ describe("onboarding backfill migration", () => {
   // Runs in a transaction that is rolled back, so the shared database is left as it was.
   it("completes onboarding for every user with a run, and no one else", async () => {
     const id = () => `test-${crypto.randomUUID()}`;
-    const [noRow, pending, done, noRun, nothing] = [id(), id(), id(), id(), id()];
+    const [noRow, pending, done, noRun, nothing, deleted] = [id(), id(), id(), id(), id(), id()];
     const earlier = new Date("2026-01-01T00:00:00.000Z");
     const sql = await backfillSql();
 
@@ -38,7 +38,18 @@ describe("onboarding backfill migration", () => {
       const isNow = (date: Date | null | undefined) =>
         date != null && Math.abs(date.getTime() - now.getTime()) <= 1;
       const run = (userId: string) => ({ userId, trigger: "MANUAL" as const, contextKey: "test" });
-      await tx.run.createMany({ data: [run(noRow), run(pending), run(pending), run(done)] });
+      // Every user but `deleted` exists; its run is left over from a deleted account.
+      await tx.user.createMany({
+        data: [noRow, pending, done, noRun, nothing].map((userId) => ({
+          id: userId,
+          name: "Test",
+          email: `${userId}@example.com`,
+          updatedAt: now,
+        })),
+      });
+      await tx.run.createMany({
+        data: [run(noRow), run(pending), run(pending), run(done), run(deleted)],
+      });
       await tx.settings.createMany({
         data: [
           { userId: pending, resumeUrl: "https://example.com/cv.pdf", locations: ["Remote"] },
@@ -50,7 +61,7 @@ describe("onboarding backfill migration", () => {
       await tx.$executeRawUnsafe(sql);
 
       const rows = await tx.settings.findMany({
-        where: { userId: { in: [noRow, pending, done, noRun, nothing] } },
+        where: { userId: { in: [noRow, pending, done, noRun, nothing, deleted] } },
       });
       const byUser = new Map(rows.map((row) => [row.userId, row]));
 
@@ -73,6 +84,8 @@ describe("onboarding backfill migration", () => {
       // Users without runs are left alone.
       expect(byUser.get(noRun)?.onboardingCompletedAt).toBeNull();
       expect(byUser.has(nothing)).toBe(false);
+      // A run whose user was deleted creates no row.
+      expect(byUser.has(deleted)).toBe(false);
 
       throw new Rollback();
     });
