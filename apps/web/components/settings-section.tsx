@@ -3,7 +3,7 @@
 import { UpdateSettings } from "@job-matcher/shared";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
-import { type ReactNode, type SubmitEvent, useState } from "react";
+import { createContext, type ReactNode, type SubmitEvent, use, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
@@ -28,6 +28,14 @@ export const settingsSections = [
 ] as const;
 export type SettingsSectionId = (typeof settingsSections)[number]["id"];
 
+const EmbeddedContext = createContext(false);
+
+// Sections inside this render only their form, without heading, description or anchor, for a
+// page that introduces them itself (the setup wizard). The settings page does not use it.
+export function EmbeddedSections({ children }: { children: ReactNode }) {
+  return <EmbeddedContext value={true}>{children}</EmbeddedContext>;
+}
+
 // A titled block with an anchor. The heading takes focus when the page is opened at its hash.
 export function SettingsSection({
   id,
@@ -42,7 +50,11 @@ export function SettingsSection({
   className?: string | undefined;
   children: ReactNode;
 }) {
+  const embedded = use(EmbeddedContext);
   const headingId = `${id}-heading`;
+  if (embedded) {
+    return <div className={cn("flex flex-col gap-6", className)}>{children}</div>;
+  }
   return (
     <section
       id={id}
