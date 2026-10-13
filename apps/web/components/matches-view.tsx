@@ -3,11 +3,14 @@
 import type { MatchStatus } from "@job-matcher/shared";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "cn";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { AppPage } from "@/components/app-page";
-import { Button } from "@/components/ui/button";
+import { ScoringHelp } from "@/components/scoring-help";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { fetchMatches, type Match, setMatchStatus } from "@/lib/matches";
+import { useOverview } from "@/lib/overview";
 
 const tabs: { status: MatchStatus; label: string }[] = [
   { status: "PENDING", label: "Pending" },
@@ -54,13 +57,12 @@ function Matches() {
         ))}
       </fieldset>
       {matches.isError && <p className="text-destructive">Could not load your matches.</p>}
-      {items?.length === 0 && (
-        <p className="text-muted-foreground">
-          {status === "PENDING"
-            ? "No pending matches. New matches from your runs appear here."
-            : "Nothing marked as applied yet."}
-        </p>
-      )}
+      {items?.length === 0 &&
+        (status === "PENDING" ? (
+          <NoPendingMatches />
+        ) : (
+          <p className="text-muted-foreground">Nothing marked as applied yet.</p>
+        ))}
       {items && items.length > 0 && (
         <ul className="divide-y border-y">
           {items.map((match) => (
@@ -78,6 +80,37 @@ function Matches() {
           {matches.isFetchingNextPage ? "Loading" : "Load more"}
         </Button>
       )}
+      {items && items.length > 0 && <ScoringHelp />}
+    </div>
+  );
+}
+
+// The next step depends on whether the user has run a check yet.
+function NoPendingMatches() {
+  const overview = useOverview();
+  const hasRun = overview.data?.setup.hasRun;
+  const action = (label: string) => (
+    <Link href="/analyze" className={buttonVariants({ variant: "outline" })}>
+      {label}
+    </Link>
+  );
+
+  if (hasRun === false) {
+    return (
+      <div className="flex flex-col items-start gap-4">
+        <p className="text-muted-foreground">
+          No matches yet. Run a check to find jobs that fit your resume.
+        </p>
+        {action("Run a check")}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-4">
+      <p className="text-muted-foreground">
+        No pending matches. New matches from your runs appear here.
+      </p>
+      {hasRun && action("Run another check")}
     </div>
   );
 }

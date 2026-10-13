@@ -3,6 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
+import { SettingsSection } from "@/components/settings-section";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -26,7 +27,7 @@ function clearedMessage(deleted: number) {
   return deleted === 1 ? "Cleared 1 saved page." : `Cleared ${deleted} saved pages.`;
 }
 
-export function ClearCache() {
+export function ClearCache({ className }: { className?: string | undefined }) {
   const [open, setOpen] = useState(false);
   const clear = useMutation({
     mutationFn: async () => deletedCount(await api("/cache", { method: "DELETE" })),
@@ -38,14 +39,12 @@ export function ClearCache() {
   });
 
   return (
-    <section className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-bold tracking-tight">Saved scrape data</h2>
-        <p className="text-muted-foreground">
-          Your resume and job pages are saved after the first scrape, and job board listings for 15
-          minutes. Clear them after updating your resume or when a board has changed.
-        </p>
-      </div>
+    <SettingsSection
+      id="data"
+      title="Data"
+      description="Your resume and job pages are saved after the first scrape, and job board listings for 15 minutes. Clear them after updating your resume or when a board has changed."
+      className={className}
+    >
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogTrigger render={<Button variant="outline" className="self-start" />}>
           Clear saved scrape data
@@ -66,6 +65,6 @@ export function ClearCache() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </section>
+    </SettingsSection>
   );
 }

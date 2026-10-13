@@ -10,23 +10,28 @@ datasource db {
 }
 
 model Settings {
-  userId            String   @id
-  resumeUrl         String?
-  discordWebhookUrl String?
-  experienceYears   Int      @default(0)
-  experienceMonths  Int      @default(0) // 0-11
-  targetMinYears    Float?
-  targetMaxYears    Float?
-  locations         String[]
-  includeUnknown    Boolean  @default(true)
+  userId                String    @id
+  resumeUrl             String?
+  discordWebhookUrl     String?
+  experienceYears       Int       @default(0)
+  experienceMonths      Int       @default(0) // 0-11
+  targetMinYears        Float?
+  targetMaxYears        Float?
+  locations             String[]
+  includeUnknown        Boolean   @default(true)
   // Job titles must contain one of these words or phrases (none = any title).
-  titleInclude      String[] @default([])
+  titleInclude          String[]  @default([])
   // Job titles must not contain any of these.
-  titleExclude      String[] @default([])
-  maxJobsPerRun     Int      @default(5) // 1-20
+  titleExclude          String[]  @default([])
+  maxJobsPerRun         Int       @default(5) // 1-20
   // Rank job titles against the resume before reading job pages.
-  triageEnabled     Boolean  @default(true)
-  scheduleMinutes   Int? // null = no scheduled checks
+  triageEnabled         Boolean   @default(true)
+  scheduleMinutes       Int? // null = no scheduled checks
+  // Onboarding: the steps are derived from the user's data; only these two moments are kept.
+  // Set when the user finishes the setup wizard, or by the first run (see createRun).
+  onboardingCompletedAt DateTime?
+  // Set when the user hides the setup checklist; cleared when they bring it back.
+  onboardingDismissedAt DateTime?
 }
 
 enum SourceKind {

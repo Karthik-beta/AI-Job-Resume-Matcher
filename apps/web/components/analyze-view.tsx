@@ -39,19 +39,32 @@ function Analyze() {
   }
   if (!sources.data || !settings.data || !runs.data) return null;
 
+  // Each missing piece links to its own Settings section.
   const missing = [
-    ...(settings.data.resumeUrl ? [] : ["a resume URL"]),
-    ...(sources.data.length > 0 ? [] : ["a job source"]),
+    ...(settings.data.resumeUrl
+      ? []
+      : [{ text: "a resume URL", label: "Add your resume", href: "/settings#resume" }]),
+    ...(sources.data.length > 0
+      ? []
+      : [{ text: "a job source", label: "Add a job source", href: "/settings#sources" }]),
   ];
   if (missing.length > 0) {
     return (
       <div className="flex flex-col items-start gap-4 border-y py-8">
         <p className="text-muted-foreground">
-          Add {missing.join(" and ")} in Settings before your first run.
+          Add {missing.map(({ text }) => text).join(" and ")} in Settings before your first run.
         </p>
-        <Link href="/settings" className={buttonVariants()}>
-          Go to Settings
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          {missing.map(({ label, href }, index) => (
+            <Link
+              key={href}
+              href={href}
+              className={buttonVariants({ variant: index === 0 ? "default" : "outline" })}
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
       </div>
     );
   }
