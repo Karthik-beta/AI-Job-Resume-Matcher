@@ -6,6 +6,7 @@ import type { Queue } from "bullmq";
 import request from "supertest";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { MatchAlerts } from "../src/runs/match-alerts";
+import { lostJobReason, queueGraceMs } from "../src/runs/recover-run";
 import { runPageUrl } from "../src/runs/run-page-url";
 import type { RunJob } from "../src/runs/runs.queue";
 import { signUp, startApp } from "./helpers";
@@ -105,6 +106,37 @@ describe("runs", () => {
     const statuses = responses.map(({ status }) => status).sort();
     expect(statuses).toEqual([201, 409]);
     for (const { status, body } of responses) if (status === 201) runIds.push(body.id);
+  });
+
+  it("ends a run that never got its job, so the next start goes through", async () => {
+    const prisma = app.get(PrismaService);
+    const erin = await signUp(app.getHttpServer());
+    await erin
+      .put("/api/settings")
+      .send({ ...defaultSettings, resumeUrl: "https://example.com/cv.pdf" })
+      .expect(200);
+    const sourceId = await addSource(erin);
+    const session = await erin.get("/api/auth/get-session").expect(200);
+    // As if the API stopped between saving the run and queueing it.
+    const lost = await prisma.run.create({
+      data: {
+        userId: session.body.user.id,
+        trigger: "MANUAL",
+        contextKey: "test",
+        sourceIds: [sourceId],
+        createdAt: new Date(Date.now() - queueGraceMs - 1_000),
+      },
+    });
+
+    const response = await erin
+      .post("/api/runs")
+      .send({ sourceIds: [sourceId] })
+      .expect(201);
+    runIds.push(response.body.id);
+    expect(await prisma.run.findUniqueOrThrow({ where: { id: lost.id } })).toMatchObject({
+      status: "FAILED",
+      stopReason: lostJobReason,
+    });
   });
 });
 

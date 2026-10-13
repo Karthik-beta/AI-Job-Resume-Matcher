@@ -11,6 +11,7 @@ import { config } from "../config";
 import { PrismaService } from "../prisma/prisma.service";
 import { createRun } from "./create-run";
 import { MatchAlerts } from "./match-alerts";
+import { recoverOrphanedRuns } from "./recover-run";
 import { runPageUrl } from "./run-page-url";
 import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
 import { upsertMatch } from "./save-match";
@@ -94,6 +95,9 @@ export class RunsService {
   }
 
   async start(userId: string, sourceIds: readonly string[]) {
+    // A run that lost its job would refuse this start. Best effort: if Redis is down, queueing
+    // fails below with a clearer error.
+    await recoverOrphanedRuns(this.queue, this.prisma, { userId }).catch(() => 0);
     const created = await createRun(this.prisma, {
       userId,
       sourceIds,
