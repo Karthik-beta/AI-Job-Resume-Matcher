@@ -37,4 +37,11 @@ The `vX.Y.Z` tag runs the CircleCI checks again. Once they pass:
 
 The installers pick up the newest GitHub release, so the next install or upgrade uses it.
 
-The publish jobs read `GHCR_USER` and `GHCR_TOKEN` from the CircleCI context `ghcr`. The token is a GitHub personal access token (classic) with the `write:packages` scope.
+The publish jobs read `GHCR_USER` and `GHCR_TOKEN` from the CircleCI context `ghcr`. GitHub Packages only accepts personal access tokens (classic), not fine-grained ones, so the token is kept as narrow as a classic token allows:
+
+- **Scope:** `write:packages` only. Create it from [this link](https://github.com/settings/tokens/new?scopes=write:packages&description=CircleCI%20GHCR%20publish), which leaves out the `repo` scope the form otherwise adds alongside it. Use an expiry date, at most 90 days.
+- **Context restrictions** (Organization Settings → Contexts → `ghcr`):
+  - a project restriction to this repository
+  - the expression restriction `pipeline.git.tag starts-with "v" and not job.ssh.enabled`, so only release tags can read the token, and never from a job rerun with SSH
+
+To rotate the token, create a new one the same way, replace `GHCR_TOKEN` in the context, and delete the old token on GitHub.
