@@ -1,0 +1,1019 @@
+/* Self-hosted and preloaded, so the page makes no third-party requests and the font usually
+   arrives before the first frame. (A metric-matched Arial fallback measured worse: its own local
+   font load added a swap, and layout shift went from 0.0001 to 0.03.) */
+@font-face {
+  font-family: "Schibsted Grotesk";
+  font-style: normal;
+  font-weight: 400 900;
+  font-display: swap;
+  src: url("assets/fonts/schibsted-grotesk-latin.woff2") format("woff2");
+}
+
+/* Tokens come from the app's theme (apps/web/app/globals.css), so the page matches what it installs. */
+:root {
+  color-scheme: light;
+  --paper: #eef1ec;
+  --sheet: #fafbf8;
+  --ink: #1c2a23;
+  --ink-soft: #56655c;
+  /* Only for wall titles, which are large text: 3.4:1 on the sheet. */
+  --ink-faint: #7d8a81;
+  --rule: #d3dacf;
+  --rule-strong: #b7c1b3;
+  --match: #2f6b4f;
+  --marker: #f3de6e;
+  --on-ink: #f4f6f1;
+  --on-ink-soft: #b9c4bb;
+
+  --font: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --step-0: 0.875rem;
+  --step-1: 1.0625rem;
+  --step-2: 1.3125rem;
+  --step-3: 2.25rem;
+  --step-4: 3.75rem;
+
+  --gutter: 1rem;
+  --max: 72rem;
+  --radius: 6px;
+  --section: clamp(4rem, 3rem + 5vw, 7.5rem);
+}
+
+@media (min-width: 48rem) {
+  :root {
+    --gutter: 2rem;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--step-1);
+  line-height: 1.55;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p,
+ol,
+ul,
+dl,
+dd,
+figure,
+pre {
+  margin: 0;
+}
+
+ol,
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+a {
+  color: var(--match);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
+a:hover {
+  text-decoration-thickness: 2px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--match);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+code,
+pre {
+  font-family: var(--mono);
+}
+
+.wrap {
+  width: 100%;
+  max-width: calc(var(--max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip {
+  position: absolute;
+  left: var(--gutter);
+  top: -4rem;
+  padding: 0.5rem 0.875rem;
+  background: var(--ink);
+  color: var(--on-ink);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+
+.skip:focus {
+  top: 1rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.25rem;
+  padding: 0.375rem 0.875rem;
+  border-radius: var(--radius);
+  font-size: var(--step-0);
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button-outline {
+  border: 1px solid var(--rule-strong);
+  background: var(--sheet);
+  color: var(--ink);
+}
+
+.button-outline:hover {
+  border-color: var(--ink-soft);
+}
+
+.icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Masthead */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1.5rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+
+.brand-mark {
+  width: 2rem;
+  height: 2rem;
+}
+
+.masthead-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  font-size: var(--step-0);
+  font-weight: 500;
+}
+
+.masthead-nav > a:not(.button) {
+  padding-block: 0.5rem;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.masthead-nav > a:not(.button):hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 30rem) {
+  .hide-small {
+    display: none;
+  }
+}
+
+/* Hero */
+
+.hero {
+  padding-block: clamp(2rem, 0.75rem + 5vw, 4.25rem) 0;
+}
+
+.hero h1 {
+  max-width: 13em;
+  font-size: clamp(2.625rem, 1.5rem + 5vw, 4.5rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lead {
+  max-width: 36em;
+  margin-top: 1.75rem;
+  color: var(--ink-soft);
+  font-size: var(--step-2);
+  line-height: 1.45;
+}
+
+.fineprint {
+  max-width: 40em;
+  margin-top: 0.875rem;
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+/* Installer: OS switch, command, copy button. Used in the hero and the install band. */
+
+.installer {
+  max-width: 50rem;
+  margin-top: 2.25rem;
+}
+
+.os-switch {
+  display: flex;
+  gap: 0.25rem;
+  min-inline-size: 0;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  border: 0;
+}
+
+.os-switch button {
+  padding: 0.25rem 0.625rem;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.os-switch button:hover {
+  color: var(--ink);
+}
+
+.os-switch button[aria-pressed="true"] {
+  background: var(--rule);
+  color: var(--ink);
+}
+
+.command {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  background: var(--sheet);
+}
+
+.command + .command {
+  margin-top: 0.5rem;
+}
+
+.command pre {
+  flex: 1;
+  min-width: 0;
+  padding: 0.875rem 0.875rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: clamp(0.8125rem, 0.75rem + 0.25vw, 0.875rem);
+  line-height: 1.5;
+}
+
+.command-os {
+  display: none;
+}
+
+.copy {
+  flex: none;
+  min-width: 4.5rem;
+  border: 0;
+  border-left: 1px solid var(--rule-strong);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: transparent;
+  font-size: var(--step-0);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.copy:hover {
+  background: var(--paper);
+}
+
+.command[hidden] {
+  display: none;
+}
+
+/* The example run */
+
+.run {
+  padding-top: clamp(2.25rem, 1.5rem + 3vw, 3.5rem);
+}
+
+.sheet {
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+  padding: clamp(1.25rem, 0.75rem + 2.5vw, 2.5rem);
+}
+
+.sheet-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 2.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.sheet-title {
+  font-size: var(--step-1);
+  font-weight: 700;
+}
+
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.75rem;
+  margin-right: auto;
+}
+
+@media (max-width: 60rem) {
+  .sheet-head {
+    justify-content: space-between;
+  }
+
+  .counts {
+    order: 1;
+    flex-basis: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-right: 0;
+  }
+
+  .counts div {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+.counts div {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+
+.counts dt {
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+.counts dd {
+  min-width: 1.5ch;
+  font-size: var(--step-2);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+html:not(.js-play) .replay {
+  display: none;
+}
+
+/* The wall: every listing the run found, set as display type. */
+
+.wall {
+  --lh: 1.3;
+  padding-block: 1.5rem;
+  font-size: clamp(1.25rem, 0.8rem + 1.4vw, 2rem);
+  font-weight: 700;
+  line-height: var(--lh);
+  letter-spacing: -0.015em;
+}
+
+.wall li {
+  display: inline;
+}
+
+/* Where the line is wide enough, a title never breaks, so each one reads as a title. */
+@media (min-width: 48rem) {
+  .wall .t {
+    white-space: nowrap;
+  }
+}
+
+.wall li:not(:last-child)::after {
+  content: "/";
+  margin-inline: 0.3em 0.2em;
+  color: var(--rule-strong);
+  font-weight: 400;
+}
+
+@supports (content: "/" / "") {
+  .wall li:not(:last-child)::after {
+    content: "/" / "";
+  }
+}
+
+/* A title's states are background images sized from 0 to 100% wide: a strike line for a dropped
+   listing and a highlighter stroke for a match. One image per line box, so wrapped titles work. */
+.t {
+  --strike: linear-gradient(transparent 55%, currentColor 55%, currentColor 62%, transparent 62%);
+  --marker-stroke: linear-gradient(
+    transparent 8%,
+    var(--marker) 8%,
+    var(--marker) 94%,
+    transparent 94%
+  );
+  display: inline;
+  padding-inline: 0.08em;
+  color: var(--ink);
+  background-repeat: repeat-y;
+  background-position: left top;
+  background-size: 0% calc(var(--lh, 1.55) * 1em);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition:
+    background-size 0.32s cubic-bezier(0.3, 0.7, 0.3, 1),
+    color 0.32s ease;
+}
+
+.t[data-v="f"] {
+  background-image: var(--strike);
+}
+
+.t[data-v="m"] {
+  background-image: var(--marker-stroke);
+}
+
+/* A check after a matched title, so a match doesn't rest on the highlighter's pale colour alone. */
+.t[data-v="m"]::after {
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  margin-left: 0.2em;
+  background: currentColor;
+  -webkit-mask: var(--check) center / contain no-repeat;
+  mask: var(--check) center / contain no-repeat;
+  opacity: 0;
+  transition: opacity 0.2s ease 0.15s;
+  --check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M2 8.5l4 4 8-9' fill='none' stroke='black' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+html:not(.js-play) .t[data-v="m"]::after,
+.t[data-v="m"].is-done::after {
+  opacity: 1;
+}
+
+/* Legend samples underline the two checked states, as the wall does. */
+.key-list .t[data-v="n"],
+.key-list .t[data-v="m"] {
+  text-decoration: underline dotted 0.1em;
+  text-underline-offset: 0.2em;
+}
+
+html:not(.js-play) .t[data-v="f"],
+.t[data-v="f"].is-done {
+  color: var(--ink-faint);
+  background-size: 100% calc(var(--lh, 1.55) * 1em);
+}
+
+html:not(.js-play) .t[data-v="n"],
+.t[data-v="n"].is-done {
+  color: var(--ink-soft);
+}
+
+html:not(.js-play) .t[data-v="m"],
+.t[data-v="m"].is-done {
+  background-size: 100% calc(var(--lh, 1.55) * 1em);
+}
+
+button.t {
+  border: 0;
+  background-color: transparent;
+  border-radius: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-decoration: underline dotted 0.06em;
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+button.t:hover,
+button.t[aria-pressed="true"] {
+  text-decoration-style: solid;
+  text-decoration-color: currentColor;
+}
+
+button.t[aria-pressed="true"] {
+  text-decoration-thickness: 0.09em;
+}
+
+.t.is-checking {
+  color: var(--match);
+}
+
+.sheet-foot {
+  display: grid;
+  gap: 1.5rem 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--rule);
+}
+
+@media (min-width: 52rem) {
+  .sheet-foot {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+.badge {
+  padding: 0.125rem 0.625rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  position: relative;
+  top: -0.125rem;
+}
+
+.badge-match {
+  background: var(--match);
+  color: var(--on-ink);
+}
+
+.badge-no-match {
+  border-color: var(--rule-strong);
+  color: var(--ink);
+}
+
+.verdict {
+  display: grid;
+  justify-items: start;
+  gap: 0.25rem;
+}
+
+.verdict .badge {
+  margin-bottom: 0.375rem;
+}
+
+@media (min-width: 40rem) {
+  .verdict {
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: baseline;
+    column-gap: 0.875rem;
+  }
+
+  .verdict > :not(.badge) {
+    grid-column: 2;
+  }
+
+  .verdict .badge {
+    grid-row: 1;
+    margin-bottom: 0;
+  }
+}
+
+.verdict-title {
+  font-weight: 700;
+  font-size: var(--step-2);
+  line-height: 1.25;
+}
+
+.verdict-company {
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+.verdict-reason {
+  max-width: 34em;
+  margin-top: 0.375rem;
+}
+
+.key {
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+.key-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem 1.25rem;
+  margin-top: 0.875rem;
+  font-weight: 600;
+}
+
+.key-list .t {
+  --lh: 1.55;
+}
+
+/* The legend is small text, which needs more contrast than the wall's display type. */
+.key-list .t[data-v="f"].is-done {
+  color: var(--ink-soft);
+}
+
+/* Sections below the first screen skip layout until they come near the viewport, which takes most
+   of the text shaping out of the first frame. They stay in the accessibility tree and find in page. */
+.steps,
+.shots,
+.needs,
+.band,
+.built,
+.footer {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 900px;
+}
+
+/* How a run works */
+
+.steps {
+  padding-top: var(--section);
+}
+
+h2 {
+  font-size: var(--step-3);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+h3 {
+  font-size: var(--step-1);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.step-list {
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--ink);
+}
+
+.step {
+  display: grid;
+  gap: 0.5rem;
+  padding-block: 1.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.step > p:last-child {
+  max-width: 38em;
+  color: var(--ink-soft);
+}
+
+@media (min-width: 52rem) {
+  .step {
+    grid-template-columns: 13rem minmax(0, 15rem) minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: baseline;
+  }
+}
+
+.step-count {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+.step-num {
+  color: var(--ink);
+  font-size: var(--step-4);
+  font-weight: 800;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screenshots */
+
+.shots {
+  padding-top: var(--section);
+}
+
+.shot-grid {
+  display: grid;
+  gap: 2rem;
+  margin-top: 2.5rem;
+}
+
+@media (min-width: 52rem) {
+  .shot-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+
+.shot-grid img {
+  width: 100%;
+  height: auto;
+}
+
+/* The app pages leave the right half empty, so each screenshot is cropped to its content column
+   here, keeping the image files identical to the ones in docs/screenshots. */
+.shot {
+  aspect-ratio: var(--crop-w) / var(--crop-h);
+  overflow: hidden;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--paper);
+}
+
+.shot img {
+  width: calc(1280 / var(--crop-w) * 100%);
+  max-width: none;
+  margin-left: calc(var(--crop-x) / var(--crop-w) * -100%);
+}
+
+.shot-grid figcaption {
+  max-width: 34em;
+  margin-top: 0.875rem;
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+/* What it takes to run */
+
+.needs {
+  padding-block: var(--section);
+}
+
+.needs-grid {
+  display: grid;
+  margin-top: 2.5rem;
+  border-top: 1px solid var(--ink);
+}
+
+.needs-grid > div {
+  padding-block: 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.needs-grid p {
+  margin-top: 0.5rem;
+  color: var(--ink-soft);
+}
+
+@media (min-width: 52rem) {
+  .needs-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .needs-grid > div {
+    padding: 1.5rem 2rem 0.5rem;
+    border-bottom: 0;
+  }
+
+  .needs-grid > div:first-child {
+    padding-left: 0;
+  }
+
+  .needs-grid > div + div {
+    border-left: 1px solid var(--rule);
+  }
+}
+
+/* Install band */
+
+.band {
+  background: var(--ink);
+  color: var(--on-ink);
+  padding-block: var(--section);
+}
+
+.band a {
+  color: var(--on-ink);
+}
+
+.band-inner {
+  display: grid;
+  gap: 2.5rem;
+}
+
+@media (min-width: 60rem) {
+  .band-inner {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    gap: 4rem;
+    align-items: start;
+  }
+}
+
+.band-copy p {
+  max-width: 34em;
+  margin-top: 1.25rem;
+  color: var(--on-ink-soft);
+}
+
+.band-copy code {
+  color: var(--on-ink);
+  font-size: 0.9em;
+}
+
+.installer-dark {
+  margin-top: 0;
+}
+
+.installer-dark .os-switch button {
+  color: var(--on-ink-soft);
+}
+
+.installer-dark .os-switch button:hover {
+  color: var(--on-ink);
+}
+
+.installer-dark .os-switch button[aria-pressed="true"] {
+  background: rgb(244 246 241 / 0.12);
+  color: var(--on-ink);
+}
+
+.installer-dark .command {
+  border-color: rgb(244 246 241 / 0.22);
+  background: rgb(244 246 241 / 0.06);
+}
+
+.installer-dark .copy {
+  border-left-color: rgb(244 246 241 / 0.22);
+}
+
+.installer-dark .copy:hover {
+  background: rgb(244 246 241 / 0.08);
+}
+
+.band :focus-visible {
+  outline-color: var(--marker);
+}
+
+.first-run {
+  counter-reset: first-run;
+  margin-top: 2rem;
+}
+
+.first-run li {
+  counter-increment: first-run;
+  position: relative;
+  padding: 0.75rem 0 0.75rem 2rem;
+  border-top: 1px solid rgb(244 246 241 / 0.16);
+  color: var(--on-ink-soft);
+}
+
+.first-run li::before {
+  content: counter(first-run);
+  position: absolute;
+  left: 0;
+  color: var(--on-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.first-run strong {
+  color: var(--on-ink);
+  font-weight: 500;
+}
+
+/* How it's built */
+
+.built {
+  display: grid;
+  gap: 2.5rem;
+  padding-block: var(--section);
+}
+
+@media (min-width: 52rem) {
+  .built {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 7fr);
+    gap: 4rem;
+  }
+}
+
+.built-intro p {
+  max-width: 30em;
+  margin-top: 1.25rem;
+  color: var(--ink-soft);
+}
+
+.built-list {
+  border-top: 1px solid var(--ink);
+}
+
+.built-list > div {
+  display: grid;
+  gap: 0.375rem;
+  padding-block: 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+@media (min-width: 40rem) {
+  .built-list > div {
+    grid-template-columns: 13rem minmax(0, 1fr);
+    gap: 2rem;
+  }
+}
+
+.built-list dt {
+  font-weight: 700;
+}
+
+.built-list dd {
+  color: var(--ink-soft);
+}
+
+/* Footer */
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem 2rem;
+  padding-block: 2rem 3rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+.footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.footer-links a {
+  color: var(--ink);
+}
+
+/* Without scripts there is no switch or clipboard, so both commands show with their labels. */
+html:not(.js) .os-switch,
+html:not(.js) .copy {
+  display: none;
+}
+
+html:not(.js) .command {
+  flex-direction: column;
+}
+
+html:not(.js) .command-os {
+  display: block;
+  padding: 0.625rem 1rem 0;
+  color: var(--ink-soft);
+  font-size: var(--step-0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t {
+    transition: none;
+  }
+}
+
+/* 404 page */
+
+.not-found-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.5rem;
+  margin-top: 2rem;
+  padding-bottom: var(--section);
+}
