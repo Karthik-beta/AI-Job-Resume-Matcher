@@ -2,7 +2,7 @@
 
 <h1 align="center">Job Matcher</h1>
 
-Scrapes the job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM. Matches are saved for you to track, and can be posted to Discord.
+Job Matcher is a self-hosted AI job search tool. It scrapes the careers pages and job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM. Matches are saved for you to track, and can be posted to Discord.
 
 Built with Bun, TypeScript, NestJS, Next.js, Effect, PostgreSQL, Prisma, Redis and BullMQ.
 
