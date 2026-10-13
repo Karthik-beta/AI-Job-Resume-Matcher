@@ -7,6 +7,7 @@ import {
   sourceKindLabels,
   UpdateJobSource,
 } from "@job-matcher/shared";
+import { useQueryClient } from "@tanstack/react-query";
 import { Option, Schema } from "effect";
 import { type SubmitEvent, useEffect, useRef, useState } from "react";
 import { SettingsSection } from "@/components/settings-section";
@@ -16,6 +17,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ApiError, api } from "@/lib/api";
+import { overviewKey } from "@/lib/overview";
 import { validate } from "@/lib/validate";
 
 const Source = Schema.Struct({
@@ -53,6 +55,7 @@ export function JobSources({
   onChange?: ((sources: readonly JobSource[]) => void) | undefined;
   className?: string | undefined;
 }) {
+  const queryClient = useQueryClient();
   const [sources, setSources] = useState<Source[] | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -61,8 +64,13 @@ export function JobSources({
     if (sources !== null) onChangeRef.current?.(sources);
   }, [sources]);
 
+  // The overview counts sources (setup progress, the home page's next step), so it is
+  // refreshed whenever one is added or removed.
+  const refreshOverview = () => void queryClient.invalidateQueries({ queryKey: overviewKey });
+
   function add(created: Source) {
     setSources((current) => [created, ...(current ?? [])]);
+    refreshOverview();
     onAdded?.(created);
   }
   const [url, setUrl] = useState("");
@@ -99,6 +107,7 @@ export function JobSources({
     try {
       await api(`/sources/${id}`, { method: "DELETE" });
       setSources((current) => (current ?? []).filter((source) => source.id !== id));
+      refreshOverview();
     } catch {
       setError("Could not delete the source.");
     }
@@ -138,9 +147,21 @@ export function JobSources({
       <SearchForm onAdded={add} />
       {sources !== null &&
         (sources.length === 0 ? (
-          <p className="text-muted-foreground">
-            No job sources yet. Add a careers page URL to start.
-          </p>
+          <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
+            <p className="text-base">No job sources yet. Add a careers page URL to start.</p>
+            <p>Job board links like these are read from the board directly, at no cost:</p>
+            <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              <li>https://boards.greenhouse.io/yourcompany</li>
+              <li>https://jobs.lever.co/yourcompany</li>
+              <li>https://jobs.ashbyhq.com/yourcompany</li>
+              <li>https://jobs.smartrecruiters.com/yourcompany</li>
+              <li>https://yourcompany.recruitee.com</li>
+            </ul>
+            <p>
+              Any other careers page works too. Or search the job boards by role, like “backend
+              engineer typescript”.
+            </p>
+          </div>
         ) : (
           <ul className="divide-y border-y">
             {sources.map((source) => (

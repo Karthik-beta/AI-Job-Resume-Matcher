@@ -1,25 +1,7 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { completeSetup, signIn, signOut, signUp } from "./support";
 
-const password = "e2e-password-1234";
 const sessionCookie = "better-auth.session_token";
-
-// Creates an account through the sign-up page; a new account lands on /home.
-async function signUp(page: Page) {
-  const email = `e2e-${crypto.randomUUID()}@example.com`;
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("E2E User");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL("/home");
-  return email;
-}
-
-async function signIn(page: Page, email: string) {
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-}
 
 test("a signed-in visitor skips the landing and auth pages", async ({ page }) => {
   await signUp(page);
@@ -67,20 +49,76 @@ for (const next of ["//evil.com", "https://evil.com"]) {
 
 test("signing out returns to the landing page and protects the app again", async ({ page }) => {
   await signUp(page);
-  await page.getByRole("button", { name: /^Account menu/ }).click();
-  await page.getByRole("menuitem", { name: "Sign out" }).click();
-  await expect(page).toHaveURL("/");
+  await signOut(page);
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
 
-  for (const path of ["/home", "/analyze", "/matches", "/settings"]) {
+  for (const path of ["/home", "/welcome", "/analyze", "/matches", "/settings"]) {
     await page.goto(path);
     await expect(page).toHaveURL(`/sign-in?next=${encodeURIComponent(path)}`);
   }
 });
 
-test("a stale session cookie is cleared instead of looping", async ({ page, context }) => {
+test("a returning user who finished setup signs in to /home, never the wizard", async ({
+  page,
+}) => {
+  const email = await signUp(page);
+  await completeSetup(page);
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await signOut(page);
+
+  const visited: string[] = [];
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) visited.push(new URL(frame.url()).pathname);
+  });
+  await page.getByRole("link", { name: "Sign in" }).click();
+  await expect(page).toHaveURL("/sign-in");
+  await signIn(page, email);
+  await expect(page).toHaveURL("/home");
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+  // Next keeps the wizard's page in the DOM, hidden, so only a visible checklist counts.
+  await expect(
+    page.getByText("Get set up", { exact: true }).filter({ visible: true }),
+  ).toBeHidden();
+  expect(visited).not.toContain("/welcome");
+
+  // Setup is done, so the menu no longer offers the guide and the wizard sends them home.
+  await page.getByRole("button", { name: /^Account menu/ }).click();
+  await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Setup guide" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  await page.goto("/welcome?step=resume");
+  await expect(page).toHaveURL("/home");
+  await expect(page.getByRole("heading", { name: "Home", level: 1 })).toBeVisible();
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test("the navigation menu opens and navigates", async ({ page }) => {
+    await signUp(page);
+    await expect(page.getByRole("navigation", { name: "Primary" })).toBeHidden();
+
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("menuitem", { name: "Matches" }).click();
+    await expect(page).toHaveURL("/matches");
+    await expect(page.getByRole("heading", { name: "Matches", level: 1 })).toBeVisible();
+
+    // The menu marks the current page.
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await expect(page.getByRole("menuitem", { name: "Matches" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await page.getByRole("menuitem", { name: "Settings" }).click();
+    await expect(page).toHaveURL("/settings");
+    await expect(page.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  });
+});
+
+test("a stale session cookie is cleared instead of looping", async ({ page, context, baseURL }) => {
   await context.addCookies([
-    { name: sessionCookie, value: "stale.token", url: "http://localhost:3000" },
+    { name: sessionCookie, value: "stale.token", url: baseURL ?? "http://localhost:3000" },
   ]);
 
   // A loop would keep bouncing between /home and the sign-in page, so once the page settles
