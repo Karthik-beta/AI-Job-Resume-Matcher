@@ -52,10 +52,13 @@ function verdictOf(result: JobResult): Verdict {
 const isTriaged = (result: JobResult) => result.skipped === "TRIAGE";
 
 // The run stores how many jobs passed the filters, not how many it picked,
-// so while it runs the bar measures against the run size, less the jobs triage skipped.
+// so while it runs, progress is measured against the run size, less the jobs triage skipped.
+export const plannedJobs = (run: RunDetail, maxJobsPerRun: number) =>
+  Math.min(run.eligible - run.results.filter(isTriaged).length, maxJobsPerRun);
+
 function progressValue(run: RunDetail, maxJobsPerRun: number) {
   if (!isActive(run.status)) return 100;
-  const planned = Math.min(run.eligible - run.results.filter(isTriaged).length, maxJobsPerRun);
+  const planned = plannedJobs(run, maxJobsPerRun);
   return planned === 0 ? null : (run.checked / planned) * 100;
 }
 

@@ -192,3 +192,35 @@ export const defaultSettings: UpdateSettings = {
   triageEnabled: true,
   scheduleMinutes: null,
 };
+
+export const RunStatus = Schema.Literals(["QUEUED", "RUNNING", "COMPLETED", "STOPPED", "FAILED"]);
+export type RunStatus = typeof RunStatus.Type;
+
+// GET /api/overview: what the home page shows. Dates are ISO 8601 strings, as JSON carries them.
+export const Overview = Schema.Struct({
+  setup: Schema.Struct({
+    hasResume: Schema.Boolean,
+    sourceCount: NonNegativeInt,
+    // False while no settings have been saved and the defaults are in use.
+    hasPreferences: Schema.Boolean,
+    hasRun: Schema.Boolean,
+  }),
+  latestRun: Schema.NullOr(
+    Schema.Struct({
+      id: Schema.String,
+      status: RunStatus,
+      createdAt: Schema.String,
+      finishedAt: Schema.NullOr(Schema.String),
+      // Jobs the run found to be a match.
+      matchCount: NonNegativeInt,
+    }),
+  ),
+  // The QUEUED or RUNNING run, if any.
+  activeRun: Schema.NullOr(
+    Schema.Struct({ id: Schema.String, status: Schema.Literals(["QUEUED", "RUNNING"]) }),
+  ),
+  pendingMatches: NonNegativeInt,
+  // Null when scheduled checks are off.
+  nextScheduledRunAt: Schema.NullOr(Schema.String),
+});
+export type Overview = typeof Overview.Type;

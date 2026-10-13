@@ -2,20 +2,12 @@ import { InjectQueue } from "@nestjs/bullmq";
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { Queue } from "bullmq";
+import { withTimeout } from "../common/timeout";
 import { PrismaService } from "../prisma/prisma.service";
 import { RedisService } from "../redis/redis.service";
 import { runsQueue } from "../runs/runs.queue";
 
 const redisTimeoutMs = 2_000;
-
-// Redis commands wait for a reconnect instead of failing, so the ping needs its own deadline.
-const withTimeout = <T>(promise: Promise<T>, ms: number) => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Timed out")), ms);
-  });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-};
 
 const upOrDown = (promise: Promise<unknown>) =>
   promise.then(

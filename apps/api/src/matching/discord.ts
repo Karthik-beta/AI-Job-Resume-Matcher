@@ -15,6 +15,8 @@ export interface MatchAlert {
   readonly company: string;
   readonly jobUrl: string;
   readonly reason: string;
+  // The run's page in the web app, where the match can be reviewed.
+  readonly runUrl: string;
 }
 
 type Post = (url: string, init: RequestInit) => Promise<Response>;
@@ -29,18 +31,23 @@ export class Notifier extends Context.Service<
   }
 >()("Notifier") {}
 
-export const matchPayload = ({ title, company, jobUrl, reason }: MatchAlert) => ({
-  embeds: [
-    {
-      title: "New job match",
-      url: jobUrl,
-      description: `**${title}** at **${company}**\n\n${reason}`.slice(0, maxDescription),
-      color: 0x5865f2,
-    },
-  ],
-  // The text comes from scraped pages, so it must never ping anyone.
-  allowed_mentions: { parse: [] },
-});
+export const matchPayload = ({ title, company, jobUrl, reason, runUrl }: MatchAlert) => {
+  // The title links to the listing. The run link goes last, so a long reason can't cut it off.
+  const runLink = `\n\n[Open the run in Job Matcher](${runUrl})`;
+  const text = `**${title}** at **${company}**\n\n${reason}`;
+  return {
+    embeds: [
+      {
+        title: "New job match",
+        url: jobUrl,
+        description: `${text.slice(0, maxDescription - runLink.length)}${runLink}`,
+        color: 0x5865f2,
+      },
+    ],
+    // The text comes from scraped pages, so it must never ping anyone.
+    allowed_mentions: { parse: [] },
+  };
+};
 
 // Retry-After is in seconds on every API version. The body's retry_after is in milliseconds
 // before v8, and webhook URLs don't pick a version.
