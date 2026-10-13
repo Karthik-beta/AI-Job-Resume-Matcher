@@ -138,6 +138,40 @@ describe("runs", () => {
       stopReason: lostJobReason,
     });
   });
+
+  it("answers that a run is active when Redis does not answer", async () => {
+    const prisma = app.get(PrismaService);
+    const frank = await signUp(app.getHttpServer());
+    await frank
+      .put("/api/settings")
+      .send({ ...defaultSettings, resumeUrl: "https://example.com/cv.pdf" })
+      .expect(200);
+    const sourceId = await addSource(frank);
+    const session = await frank.get("/api/auth/get-session").expect(200);
+    const stuck = await prisma.run.create({
+      data: {
+        userId: session.body.user.id,
+        trigger: "MANUAL",
+        contextKey: "test",
+        sourceIds: [sourceId],
+        createdAt: new Date(Date.now() - queueGraceMs - 1_000),
+      },
+    });
+    // While Redis is down, the queue's commands wait for it instead of failing.
+    const getJob = spyOn(queue, "getJob").mockReturnValue(new Promise(() => {}));
+    try {
+      await frank
+        .post("/api/runs")
+        .send({ sourceIds: [sourceId] })
+        .expect(409);
+      expect((await prisma.run.findUniqueOrThrow({ where: { id: stuck.id } })).status).toBe(
+        "QUEUED",
+      );
+    } finally {
+      getJob.mockRestore();
+      await prisma.run.update({ where: { id: stuck.id }, data: { status: "FAILED" } });
+    }
+  });
 });
 
 describe("run status", () => {
