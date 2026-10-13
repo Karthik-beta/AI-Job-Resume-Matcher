@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, type ReactNode, Suspense, use, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Logo } from "@/components/logo";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -114,9 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-5 sm:px-8">
       <header className="flex items-center justify-between gap-4 py-6">
         <div className="flex items-center gap-6">
-          <Link href="/home" className="text-lg font-bold tracking-tight">
-            Job Matcher
-          </Link>
+          <Logo href="/home" />
           <Suspense fallback={<PrimaryNav pathname={null} />}>
             <CurrentPrimaryNav />
           </Suspense>
