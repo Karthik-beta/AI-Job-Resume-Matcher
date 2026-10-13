@@ -138,9 +138,21 @@ export function JobSources({
       <SearchForm onAdded={add} />
       {sources !== null &&
         (sources.length === 0 ? (
-          <p className="text-muted-foreground">
-            No job sources yet. Add a careers page URL to start.
-          </p>
+          <div className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
+            <p className="text-base">No job sources yet. Add a careers page URL to start.</p>
+            <p>Job board links like these are read from the board directly, at no cost:</p>
+            <ul className="flex flex-col gap-0.5 font-mono text-xs">
+              <li>https://boards.greenhouse.io/yourcompany</li>
+              <li>https://jobs.lever.co/yourcompany</li>
+              <li>https://jobs.ashbyhq.com/yourcompany</li>
+              <li>https://jobs.smartrecruiters.com/yourcompany</li>
+              <li>https://yourcompany.recruitee.com</li>
+            </ul>
+            <p>
+              Any other careers page works too. Or search the job boards by role, like “backend
+              engineer typescript”.
+            </p>
+          </div>
         ) : (
           <ul className="divide-y border-y">
             {sources.map((source) => (

@@ -20,11 +20,12 @@ export const statusLabels: Record<RunStatus, string> = {
   FAILED: "Failed",
 };
 
-const scrapedViaLabels: Record<ScrapeVia, string> = {
-  ATS: "Job board API",
-  CACHE: "Cached page",
-  LOCAL: "Local scrape",
-  CLOUD: "Cloud scrape",
+// How the job's ad was read, with a plain explanation for the badge's tooltip.
+const scrapedViaLabels: Record<ScrapeVia, { label: string; hint: string }> = {
+  ATS: { label: "From job board", hint: "Read from the job board's public listings, at no cost" },
+  CACHE: { label: "Saved copy", hint: "Read from a copy saved on an earlier run, at no cost" },
+  LOCAL: { label: "Read directly", hint: "Read by visiting the page directly, at no cost" },
+  CLOUD: { label: "Read with Firecrawl", hint: "Read with Firecrawl, which uses your credits" },
 };
 
 // Remaining is known only when the run read the cloud plan's credits.
@@ -36,7 +37,7 @@ function CloudCredits({ run }: { run: RunDetail }) {
       : Math.max(0, run.cloudCreditsAtStart - run.cloudCredits);
   return (
     <p className="text-sm text-muted-foreground">
-      Cloud credits used: {run.cloudCredits}
+      Firecrawl credits used: {run.cloudCredits}
       {remaining !== null && ` · remaining: ${remaining}`}
     </p>
   );
@@ -50,6 +51,18 @@ function verdictOf(result: JobResult): Verdict {
 }
 
 const isTriaged = (result: JobResult) => result.skipped === "TRIAGE";
+
+// The API records a title ranking skip as "Skipped by title triage", with the model's reason.
+const triagePrefix = /^Skipped by title triage:?\s*/;
+
+function reasonOf(result: JobResult) {
+  if (result.error !== null) return result.error;
+  if (result.reason === null || !isTriaged(result)) return result.reason;
+  const why = result.reason.replace(triagePrefix, "");
+  return why === ""
+    ? "Its title looks unlikely to fit your resume, so the ad wasn't read."
+    : `Its title looks unlikely to fit: ${why}`;
+}
 
 // The run stores how many jobs passed the filters, not how many it picked,
 // so while it runs, progress is measured against the run size, less the jobs triage skipped.
@@ -93,7 +106,9 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
         </dl>
         <CloudCredits run={run} />
         {triaged.length > 0 && (
-          <p className="text-sm text-muted-foreground">Skipped by title triage: {triaged.length}</p>
+          <p className="text-sm text-muted-foreground">
+            Skipped because their titles look unlikely to fit: {triaged.length}
+          </p>
         )}
         <Progress
           value={progressValue(run, maxJobsPerRun)}
@@ -127,14 +142,16 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                       {result.scrapedVia && (
-                        <Badge variant="outline">{scrapedViaLabels[result.scrapedVia]}</Badge>
+                        <Badge variant="outline" title={scrapedViaLabels[result.scrapedVia].hint}>
+                          {scrapedViaLabels[result.scrapedVia].label}
+                        </Badge>
                       )}
                       <VerdictBadge verdict={verdictOf(result)} />
                     </div>
                   </div>
-                  {(result.error ?? result.reason) && (
+                  {reasonOf(result) && (
                     <p className="text-sm leading-relaxed text-muted-foreground">
-                      {result.error ?? result.reason}
+                      {reasonOf(result)}
                     </p>
                   )}
                   {result.isMatch === true && !result.matchSaved && (
