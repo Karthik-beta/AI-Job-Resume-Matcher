@@ -1,5 +1,8 @@
 # One image for the API and the worker, one for the web app. Both build from the workspace root.
 FROM oven/bun:1.4 AS base
+LABEL org.opencontainers.image.source="https://github.com/Karthik-beta/AI-Job-Resume-Matcher" \
+      org.opencontainers.image.description="Job Matcher: scrapes job boards and matches listings to your resume with an LLM" \
+      org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 COPY package.json bun.lock tsconfig.base.json prisma.config.ts ./
 COPY apps/api/package.json apps/api/

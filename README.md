@@ -2,20 +2,61 @@
 
 <h1 align="center">Job Matcher</h1>
 
-Scrapes the job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM. Matches are saved for you to track, and can be posted to Discord.
+<p align="center">
+  <strong>Point it at the job boards you follow. It reads every new listing and tells you which ones fit your resume.</strong>
+</p>
 
-Built with Bun, TypeScript, NestJS, Next.js, Effect, PostgreSQL, Prisma, Redis and BullMQ.
-
-**Demo:** there is no hosted demo; run it locally instead. With `PROVIDERS=fake` it uses fixture pages instead of real scrapes and AI calls, so it needs no API keys:
-
-```bash
-cp deploy/.env.example deploy/.env   # fill in POSTGRES_PASSWORD, BETTER_AUTH_SECRET, BETTER_AUTH_URL=http://localhost:8080
-WEB_PORT=8080 docker compose -f deploy/compose.yml up -d --build
-```
-
-Then open http://localhost:8080, sign up, add any careers page URL and a resume URL in Settings, and press Analyze.
+<p align="center">
+  <a href="https://dl.circleci.com/status-badge/redirect/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master"><img src="https://dl.circleci.com/status-badge/img/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master.svg?style=shield" alt="CircleCI"></a>
+  <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/releases/latest"><img src="https://img.shields.io/github/v/release/Karthik-beta/AI-Job-Resume-Matcher?sort=semver" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript">
+  <img src="https://img.shields.io/badge/self--hosted-Docker-2496ed" alt="Self-hosted with Docker">
+</p>
 
 ![Landing page](docs/screenshots/home.png)
+
+## What it does
+
+- **Watches your job sources.** Add Greenhouse, Lever, Ashby, SmartRecruiters or Recruitee boards, any careers page, or a web search for a role. It re-checks them on a schedule.
+- **Filters out the noise.** It drops listings outside your locations, experience level and title keywords before spending anything on AI.
+- **Reads each job against your resume.** An LLM scores the fit and explains it, so you open only the jobs worth applying to.
+- **Keeps track for you.** Matches are saved, marked as applied when you apply, and can be posted to a Discord channel.
+
+It is self-hosted: your resume and data stay on your machine.
+
+## Quick start
+
+All you need is [Docker Desktop](https://docs.docker.com/get-docker/) (Windows, macOS or Linux). Run one command:
+
+**macOS / Linux / WSL**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.sh | sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/Karthik-beta/AI-Job-Resume-Matcher/master/install.ps1 | iex
+```
+
+The installer:
+1. Downloads the stack into `~/job-matcher`.
+2. Generates the secrets.
+3. Asks for two optional API keys.
+4. Starts the app at **http://localhost:8080**.
+
+Sign up, add a careers page and a link to your resume in **Settings**, then press **Analyze**.
+
+| Mode | Keys | What you get |
+| --- | --- | --- |
+| **Demo** (press Enter at the key prompts) | none | The whole app on built-in sample pages. Free, and a good first look. |
+| **Live** | [OpenRouter](https://openrouter.ai/keys) for AI matching, [Firecrawl](https://www.firecrawl.dev/app/api-keys) for scraping (free plan: 1,000 pages a month) | Real job boards and real matches. AI cost is a fraction of a cent per job. |
+
+To switch from demo to live later, put both keys in `~/job-matcher/.env`, set `PROVIDERS=live`, and run `docker compose up -d` in that folder. To upgrade, run the installer again.
+
+Prefer not to pipe a script into your shell? The [self-hosting guide](docs/self-hosting.md) has the three manual commands. It also covers HTTPS, backups and uninstalling.
 
 | Analyze | Matches |
 | --- | --- |
@@ -27,6 +68,25 @@ Then open http://localhost:8080, sign up, add any careers page URL and a resume 
 ![Job sources and matching preferences](docs/screenshots/settings.png)
 
 </details>
+
+## Engineering highlights
+
+- **Typed failure handling.** The matching pipeline is written with [Effect](https://effect.website). Every failure is a tagged error in the type signature ([`errors.ts`](apps/api/src/matching/errors.ts)), so the run decides on purpose what each one does:
+  - a rejected API key stops the run
+  - a blocked page fails only that job
+  - a Discord outage is only logged
+- **Safe, idempotent runs.** The API only queues a run; a BullMQ worker does the slow work.
+  - The run id doubles as the queue job id, so a double click can't queue a run twice ([`schedule.ts`](apps/api/src/runs/schedule.ts)).
+  - A per-user Postgres advisory lock stops two runs from overlapping ([`create-run.ts`](apps/api/src/runs/create-run.ts)).
+- **Budget-aware scraping.** Each run reads the Firecrawl plan's remaining credits and keeps a reserve. Scheduled runs share an even daily allowance, so a frequent schedule can't use up the month early ([`credit-guard.ts`](apps/api/src/matching/credit-guard.ts)).
+- **Hybrid scrape routing.** It scrapes on a self-hosted Firecrawl first and falls back to the cloud only for pages that block it. A site that blocks the local instance twice in a row goes straight to the cloud for a week ([`scrape-routes.ts`](apps/api/src/matching/scrape-routes.ts)). ATS boards are read through their public APIs at no cost.
+- **Resumable work.** Scraped pages are cached in Postgres, and evaluations are keyed by a hash of the resume, sources, model and requirements ([`context-key.ts`](apps/api/src/matching/context-key.ts)). A rerun picks up where the last one stopped and never pays twice for the same job.
+- **Cost controls on the LLM.** Before each run it checks that the model has an endpoint under a per-token price cap. It uses OpenAI's flex tier and backs off exponentially when flex capacity runs out ([`preflight.ts`](apps/api/src/matching/preflight.ts), [`completion.ts`](apps/api/src/matching/completion.ts)).
+- **Tested like a product.**
+  - 50+ test files, with a per-file coverage gate of 90% of lines.
+  - Playwright end-to-end tests that run against fake providers in an isolated database.
+  - CI that builds the production images, boots the full Compose stack, and runs the installer against it before anything merges.
+- **Shippable.** It publishes multi-arch images (amd64 and arm64) to GHCR on every release, and installs with one command on Windows, macOS and Linux.
 
 ## Architecture
 
@@ -52,137 +112,67 @@ flowchart LR
   4. Evaluate each job against the resume.
   5. Save matches and send the Discord alerts.
 - It also runs each user's scheduled re-checks.
-- **Providers:** Firecrawl scrapes pages, OpenRouter evaluates jobs with a strict JSON schema, and Discord receives match alerts. `PROVIDERS=fake` swaps all three for fixtures.
+- **Providers:** Firecrawl scrapes pages, OpenRouter evaluates jobs with a strict JSON schema, and Discord receives match alerts. `PROVIDERS=fake` swaps all three for fixtures. That's how the demo mode and the end-to-end tests run with no keys.
 
-## Design decisions
+### Design decisions
 
-- **A queue, not the request.** A run scrapes several pages and makes one LLM call per job, which can take minutes on the free Firecrawl plan's 10 requests a minute. The API answers immediately with a queued run, and the page polls for progress. The run id is the job id, so a double click can't queue the same run twice, and a per-user advisory lock stops two runs from starting at once.
-- **Effect only where the failures are.** The matching pipeline (scraping, rate limiting, retries, evaluation, notifications) is written with Effect. That gives it typed errors: a 401 stops the run, a bad page only fails that job, and a Discord failure is just logged. Nest controllers and services stay plain async code. The two meet at one `ManagedRuntime`, built when the worker boots.
-- **The cache lives in Postgres.** Scraped resumes, job pages and source listings are stored per user in a `PageCache` table: listings for 15 minutes (a day for search sources), everything else until the user clears it. The cache survives restarts, needs no extra service and can be cleared from Settings. Analysed jobs are keyed by a hash of the resume URL, sources, model and requirements, so running again continues where the last run stopped.
-- **A single worker.** Concurrency is 1, so every run shares one Firecrawl rate limiter, and jobs are checked one at a time and never interleave. This is enough for a personal tool; more throughput would need a shared, Redis-backed limiter first.
+- **A queue, not the request.** A run scrapes several pages and makes one LLM call per job, which can take minutes on the free Firecrawl plan's 10 requests a minute. The API answers immediately with a queued run, and the page polls for progress.
+- **Effect only where the failures are.** Scraping, rate limiting, retries, evaluation and notifications use Effect; Nest controllers and services stay plain async code. The two meet at one `ManagedRuntime`, built when the worker boots.
+- **The cache lives in Postgres.** Scraped resumes, job pages and source listings are stored per user in a `PageCache` table. Listings are kept for 15 minutes (a day for search sources), and everything else until the user clears it. The cache survives restarts, needs no extra service, and can be cleared from Settings.
+- **A single worker.** Concurrency is 1, so every run shares one Firecrawl rate limiter, and jobs are checked one at a time and never interleave. That's enough for a personal tool. More throughput would first need a shared, Redis-backed limiter.
 
-## Project structure
+## Tech stack
+
+| Layer | Technology |
+| --- | --- |
+| Runtime and language | Bun, TypeScript |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4 |
+| Backend | NestJS, Effect, better-auth |
+| Data | PostgreSQL 17 with Prisma, Redis 8 with BullMQ |
+| AI and scraping | OpenRouter (structured JSON output), Firecrawl (cloud or self-hosted) |
+| Quality | Biome, Bun test, Playwright, CircleCI |
+| Delivery | Docker multi-stage builds, Docker Compose, GHCR multi-arch images |
+
+## Development
+
+You need [Bun](https://bun.sh) and Docker.
+
+```bash
+cp .env.example .env    # then set BETTER_AUTH_SECRET, e.g. to the output of: openssl rand -base64 32
+bun install
+bun run db:migrate
+bun run dev
+```
+
+`bun run dev` starts Postgres and Redis in Docker, then the web app at http://localhost:3000 and the API and worker with hot reload (health check: http://localhost:4000/api/health).
+
+Set `PROVIDERS=fake` in `.env` to run the worker on fixtures with no API keys. With `PROVIDERS=live`, the worker needs `OPENROUTER_API_KEY` and a Firecrawl (see [configuration](docs/configuration.md)). The API refuses to start if a required variable is missing. When `.env.example` gains a new variable, copy it into your `.env`.
+
+| Script | Description |
+| --- | --- |
+| `bun run dev` | Start Postgres and Redis, then the web app, API and run worker |
+| `bun run db:migrate` | Create and apply Prisma migrations, then regenerate the Prisma client |
+| `bun run lint` | Lint and format check with Biome |
+| `bun run typecheck` | Type-check every app |
+| `bun run test` | Unit and integration tests, with per-file coverage thresholds |
+| `bun run test:e2e` | Playwright end-to-end tests on fake providers, in their own database |
+| `bun run check` | All of the above (what CI runs) |
 
 ```
 apps/api         NestJS API and the run worker
 apps/web         Next.js frontend
 packages/shared  Request schemas shared by both apps
 prisma/          Database schema and migrations
-e2e/             Playwright end-to-end test
-deploy/          Docker Compose stack for one host
+e2e/             Playwright end-to-end tests
+deploy/          Docker Compose stack for self-hosting
 ```
 
-## Getting started
+## Documentation
 
-Requires [Bun](https://bun.sh) and Docker.
+- [Self-hosting](docs/self-hosting.md): install, upgrade, live mode, HTTPS, backups, troubleshooting
+- [Configuration](docs/configuration.md): scraping modes, job sources, filters, Firecrawl credits, OpenRouter routing
+- [Contributing](CONTRIBUTING.md): git hooks, pull requests and releases
 
-```bash
-cp .env.example .env
-bun install
-bun run db:migrate
-bun run dev
-```
+## License
 
-- Web: http://localhost:3000
-- API: http://localhost:4000/api/health
-
-Set `BETTER_AUTH_SECRET` in `.env` to a random string, for example the output of `openssl rand -base64 32`.
-
-The worker needs `OPENROUTER_API_KEY` and a Firecrawl to scrape with (see [Scraping modes](#scraping-modes)). Without them the API still starts, but the worker exits. Set `PROVIDERS=fake` to run the worker on the fixtures in `apps/api/test/fixtures` instead, with no keys and no external calls.
-
-### Scraping modes
-
-`FIRECRAWL_MODE` picks where pages are scraped:
-
-| Mode | Needs | What it does |
-| --- | --- | --- |
-| `cloud` (default) | `FIRECRAWL_API_KEY` | Every scrape, map and search goes to Firecrawl's cloud, 1 credit a page. `FIRECRAWL_CLOUD_PROXY=auto` retries blocked pages with enhanced proxies at no extra cost. |
-| `local` | `FIRECRAWL_LOCAL_URL` | A self-hosted Firecrawl (below). No credits and no plan rate limit; a site that blocks it fails just that job. Search sources need `FIRECRAWL_LOCAL_SEARCH=true` (SearXNG on the instance). |
-| `hybrid` | both | Local first; only a page the site blocked, or one the local instance could not answer, is retried on the cloud with the auto proxy. A site that blocks the local instance twice in a row goes straight to the cloud for a week. Search sources use the cloud. |
-
-A run in `local` or `hybrid` mode stops at once if the local instance is not running. Each job on the run page shows where its text came from (job board API, cache, local or cloud scrape), and the run shows the cloud credits it used.
-
-### Self-hosted Firecrawl
-
-`local` and `hybrid` mode scrape with a self-hosted Firecrawl. `docker-compose.yml` runs one under the `firecrawl` profile, on Firecrawl's published images (pinned to 2.11.506): set `COMPOSE_PROFILES=firecrawl` and `FIRECRAWL_LOCAL_URL=http://localhost:3002` in `.env`, and `bun run dev` starts it with its own Postgres, Redis and RabbitMQ. The images take about 6 GB on disk; once pulled, the API is ready in about 95 seconds, and its container uses about 3.5 GB of memory under light scraping (the compose file caps it at 8 GB). It needs no API key and only publishes port 3002.
-
-For search sources in `local` mode, run a [SearXNG](https://docs.searxng.org) instance with JSON output enabled, set `SEARXNG_ENDPOINT` (and optionally `SEARXNG_ENGINES` and `SEARXNG_CATEGORIES`) in `.env` for the Firecrawl container, and `FIRECRAWL_LOCAL_SEARCH=true` for the app. Without it, search sources are skipped in `local` mode with a warning in the API log saying so, and the run reads its other sources.
-
-To stop the self-hosted Firecrawl without touching the app's database:
-
-```bash
-docker compose --profile firecrawl stop firecrawl-api firecrawl-playwright firecrawl-redis firecrawl-rabbitmq firecrawl-postgres
-```
-
-### Job sources
-
-Add sources on the Settings page:
-
-- **ATS boards** (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee) are detected from the board URL and read from the board's public API, with no Firecrawl credits. Job ads come with the listings, or from the API one job at a time.
-- **Web pages** (any careers page) are scraped. Job links are read from the page's markdown across its "next" pages (`maxPages`, default 3), optionally only inside a CSS `selector` (both set on the `JobSource` row; not in the UI yet); when the links carry no titles, the LLM reads the page. A page source can instead take its job links from Firecrawl's **site map** (1 credit), falling back to the page when the map has none. A page that embeds an ATS board is offered as a switch to that board.
-- **Searches** run a web search for a query, limited to the ATS job boards and the past week (`/search` with `includeDomains`, including the EU Greenhouse and Lever hosts, and `tbs=qdr:w`; 10 results, 2 credits, and an empty search is counted as 2 too). Results on an ATS host are read through that ATS's API where it has a per-job endpoint (Greenhouse, Lever, SmartRecruiters) and scraped otherwise. A search runs at most once a day; the rest of the day's runs reuse its results. A search that cannot run (no SearXNG in `local` mode, or no cloud credits left in `hybrid` mode) is skipped with a warning in the log, and the run goes on with its other sources.
-
-### Filters and triage
-
-Listings are filtered by your locations and experience, then by **title filters**: a title must contain one of the include keywords (when there are any) and none of the exclude keywords, matched as whole words. With **title triage** on (the default), the LLM ranks the remaining titles against your resume in batches, and only likely fits are read and evaluated, best first, up to the run size. Skipped jobs are listed on the run page and not triaged again in the same context.
-
-### Firecrawl credits
-
-The free cloud plan has 1,000 credits a month with no rollover, and 10 requests a minute for scrape, map and search ([billing](https://docs.firecrawl.dev/billing), [rate limits](https://docs.firecrawl.dev/rate-limits)). In `cloud` and `hybrid` mode each run reads the plan's remaining credits once and keeps `FIRECRAWL_CREDIT_RESERVE` (default 50) untouched:
-
-- A **manual** run may spend everything above the reserve.
-- **Scheduled** runs share one allowance per day (UTC): an even share per day left in the billing period (the end of the calendar month when Firecrawl reports none, or one already past). Each scheduled run gets what the day's earlier scheduled runs left of it, and leaves out jobs that would not fit, so a frequent schedule cannot spend the month early. Manual runs do not count against it. Jobs read from an ATS API or the cache count as free.
-- In `cloud` mode a run stops when even its sources would not fit, or once it has spent its share: "Firecrawl credit reserve reached (N left until <date>)", or "Firecrawl daily credit allowance reached (…)" for a scheduled run. In `hybrid` mode the local scrapes go on, and pages that need the cloud fail with "needs cloud; credit reserve reached" (a search source that needs the cloud is skipped).
-
-Spending is counted from each request's reported cost, with no further API calls.
-
-### OpenRouter and GPT-6 Luna on flex
-
-Evaluations, listing extraction and title triage go through OpenRouter. The defaults run `openai/gpt-6-luna:floor` on OpenAI's flex tier at low reasoning effort:
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `OPENROUTER_MODEL` | | The model, e.g. `openai/gpt-6-luna:floor` |
-| `OPENROUTER_SERVICE_TIER` | `flex` | `auto`, `default`, `flex`, `priority` or `scale` |
-| `OPENROUTER_PROVIDERS` | `openai` | Comma-separated providers the request may use |
-| `OPENROUTER_MAX_PRICE_PROMPT` | `0.05` | Price cap, USD per million prompt tokens |
-| `OPENROUTER_MAX_PRICE_COMPLETION` | `0.25` | Price cap, USD per million completion tokens |
-| `OPENROUTER_REASONING_EFFORT` | `low` | Reasoning effort |
-
-Each run first checks that the model has a (flex) endpoint from the allowed providers under the price cap, and stops if not. Flex capacity comes and goes, so a 429 or 503 backs off for 1, 2, 4, 8 and 16 minutes before that job fails, and a reply served on another tier than flex is logged as a warning.
-
-When `.env.example` gains a new variable, copy it into your `.env`. The API refuses to start if a required variable is missing.
-
-If port 5432 is already in use, change `POSTGRES_PORT` and the port in `DATABASE_URL`.
-
-## Scripts
-
-| Script | Description |
-| --- | --- |
-| `bun run dev` | Start Postgres and Redis, then the web app, API and run worker |
-| `bun run db:migrate` | Create and apply Prisma migrations, then regenerate the Prisma client |
-| `bun run db:generate` | Regenerate the Prisma client only |
-| `bun run lint` | Lint and format check with Biome |
-| `bun run typecheck` | Type-check every app |
-| `bun run test` | Unit and integration tests, with per-file coverage thresholds of 90% of lines and 75% of functions |
-| `bun run test:e2e` | Playwright happy path against fake providers, in its own `<database>_e2e` database |
-| `bun run check` | All of the above (used by CI) |
-
-`bun install` points git at `.githooks`. The pre-commit hook runs lint and typecheck, and the commit-msg hook rejects `Co-Authored-By` and "Generated with" lines. Merge commits skip the message check.
-
-## Pull requests
-
-`master` is protected, for admins too: a commit needs a passing CircleCI `check` status before it can land, and force pushes and deletion are blocked.
-
-A PR stacked on another feature branch must be retargeted before its base branch goes away. GitHub closes a PR whose base branch is deleted, and it can't be reopened. To merge a stack:
-
-1. Merge the bottom PR into `master`. Keep its branch for now.
-2. Change the base of the next PR to `master` (`gh pr edit <number> --base master`), and merge `master` into its branch if GitHub reports conflicts.
-3. Only then delete the merged branch.
-4. Repeat for each PR up the stack.
-
-Before merging, check the base shown at the top of the PR is `master`, so it doesn't land in another feature branch.
-
-## Deploying
-
-See [deploy/README.md](deploy/README.md) for running the whole stack on one host with Docker Compose.
+[MIT](LICENSE) © Karthik P

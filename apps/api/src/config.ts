@@ -6,7 +6,9 @@ const Env = Schema.Struct({
   BETTER_AUTH_SECRET: Schema.NonEmptyString,
   BETTER_AUTH_URL: Schema.NonEmptyString,
   REDIS_URL: Schema.NonEmptyString,
-  OPENROUTER_MODEL: Schema.NonEmptyString,
+  OPENROUTER_MODEL: Schema.NonEmptyString.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("openai/gpt-6-luna:floor")),
+  ),
   // "fake" swaps Firecrawl, OpenRouter and Discord for fixtures, for tests and demos.
   PROVIDERS: Schema.Literals(["live", "fake"]).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed("live" as const)),
