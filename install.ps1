@@ -54,7 +54,15 @@
     if ($line) { $line.Substring($Key.Length + 1).Trim() } else { '' }
   }
 
+  # Windows PowerShell 5.1 turns a native command's stderr into terminating errors under
+  # $ErrorActionPreference = 'Stop', so docker runs with 'Continue' and is judged by its exit code.
+  function Test-Docker {
+    $ErrorActionPreference = 'Continue'
+    & docker @args *> $null
+    $LASTEXITCODE -eq 0
+  }
   function Invoke-Docker {
+    $ErrorActionPreference = 'Continue'
     & docker @args
     if ($LASTEXITCODE -ne 0) { throw "docker $($args -join ' ') failed" }
   }
@@ -68,10 +76,8 @@
   if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Fail 'Docker is not installed. Install Docker Desktop (https://docs.docker.com/desktop/setup/install/windows-install/) and run this again.'
   }
-  docker compose version *> $null
-  if ($LASTEXITCODE -ne 0) { Fail 'Docker Compose v2 is missing. Update Docker Desktop and run this again.' }
-  docker info *> $null
-  if ($LASTEXITCODE -ne 0) { Fail 'Docker is installed but not running. Start Docker Desktop and run this again.' }
+  if (-not (Test-Docker compose version)) { Fail 'Docker Compose v2 is missing. Update Docker Desktop and run this again.' }
+  if (-not (Test-Docker info)) { Fail 'Docker is installed but not running. Start Docker Desktop and run this again.' }
 
   # 2. Version
   if ($env:JOB_MATCHER_VERSION) {
@@ -102,8 +108,7 @@
     Set-EnvValue 'JOB_MATCHER_VERSION' $Version
   } else {
     # A database left by an earlier install was created with that install's password.
-    docker volume inspect job-matcher_postgres-data *> $null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-Docker volume inspect job-matcher_postgres-data) {
       Fail "A database from an earlier Job Matcher install exists, but its .env is gone. Restore that .env into $Dir, or delete the old data with: docker volume rm job-matcher_postgres-data job-matcher_redis-data"
     }
     Step 'Creating settings'
