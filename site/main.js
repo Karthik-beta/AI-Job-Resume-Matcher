@@ -137,10 +137,14 @@
 
   function copy(button) {
     const text = button.parentElement.querySelector("code").textContent;
+    // The button's new label isn't announced by every screen reader, so a status line says it too.
+    const status = document.querySelector("[data-copy-status]");
     const done = (label) => {
       button.textContent = label;
+      status.textContent = "Install command copied";
       window.setTimeout(() => {
         button.textContent = "Copy";
+        status.textContent = "";
       }, 2000);
     };
     if (!navigator.clipboard) {

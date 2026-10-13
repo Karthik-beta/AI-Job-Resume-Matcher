@@ -6,11 +6,13 @@
     <title>Job Matcher: match job listings to your resume</title>
     <meta
       name="description"
-      content="Job Matcher is a free, self-hosted tool that reads the job boards you follow and checks every new listing against your resume with an LLM, giving a reason for each verdict."
+      content="A free, self-hosted tool that reads the job boards you follow and checks each new listing against your resume with an LLM, with the reason for every verdict."
     />
     <link rel="canonical" href="https://karthik-beta.github.io/AI-Job-Resume-Matcher/" />
     <meta name="theme-color" content="#eef1ec" />
+    <link rel="icon" href="assets/favicon.ico" sizes="32x32" />
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Job Matcher" />
@@ -28,6 +30,24 @@
     <meta property="og:image:height" content="640" />
     <meta property="og:image:alt" content="Job Matcher: match job listings to your resume with AI" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Job Matcher",
+        "description": "A self-hosted tool that reads the job boards you follow and checks each new listing against your resume with an LLM, with the reason for every verdict.",
+        "url": "https://karthik-beta.github.io/AI-Job-Resume-Matcher/",
+        "image": "https://karthik-beta.github.io/AI-Job-Resume-Matcher/assets/social-preview.png",
+        "screenshot": "https://karthik-beta.github.io/AI-Job-Resume-Matcher/assets/analyze.png",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Windows, macOS, Linux",
+        "license": "https://opensource.org/licenses/MIT",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Person", "name": "Karthik P", "url": "https://github.com/Karthik-beta" },
+        "sameAs": ["https://github.com/Karthik-beta/AI-Job-Resume-Matcher"]
+      }
+    </script>
 
     <script>
       // Set before first paint, so the example run starts unmarked instead of flashing its result.
@@ -36,11 +56,12 @@
         document.documentElement.classList.add("js-play");
       }
     </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700;800&display=swap"
+      rel="preload"
+      href="assets/fonts/schibsted-grotesk-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
     <link rel="stylesheet" href="styles.css" />
     <script src="main.js" defer></script>
@@ -434,5 +455,6 @@
         </li>
       </ul>
     </footer>
+    <p class="vh" role="status" data-copy-status></p>
   </body>
 </html>

@@ -27,7 +27,7 @@ Before merging, check that the base shown at the top of the PR is `master`, so i
 
 The marketing page is the static site in `site/`: plain HTML, CSS and JavaScript with no build step. Biome lints its CSS and JavaScript with the rest of the repo. To preview it, serve the folder, for example with `python -m http.server 5180 --directory site`.
 
-When a change to `site/` lands on `master`, the GitHub Actions workflow `.github/workflows/pages.yml` publishes it to https://karthik-beta.github.io/AI-Job-Resume-Matcher/. The images in `site/assets/` are copies of the ones in `docs/`, so when a screenshot in `docs/screenshots/` changes, copy it into `site/assets/` too.
+When a change to `site/` lands on `master`, the GitHub Actions workflow `.github/workflows/pages.yml` publishes it to https://karthik-beta.github.io/AI-Job-Resume-Matcher/. The images in `site/assets/` are copies of the ones in `docs/`, so when a screenshot in `docs/screenshots/` changes, copy it into `site/assets/` too. The font is self-hosted from `site/assets/fonts/` (Schibsted Grotesk, SIL Open Font License), so the page makes no third-party requests. `site/404.html` is served for any missing path, so its links are absolute (`/AI-Job-Resume-Matcher/…`).
 
 ## Releases
 
