@@ -196,6 +196,34 @@ export const defaultSettings: UpdateSettings = {
 export const RunStatus = Schema.Literals(["QUEUED", "RUNNING", "COMPLETED", "STOPPED", "FAILED"]);
 export type RunStatus = typeof RunStatus.Type;
 
+// Setup steps, in the setup wizard's order. Each is derived from the user's data:
+// - resume: a resume URL is saved.
+// - preferences: a saved setting other than the resume differs from defaultSettings. Optional:
+//   accepting the defaults is a valid choice, so it never holds up the other steps.
+// - source: at least one job source.
+// - firstRun: at least one run, of either trigger.
+export const OnboardingStep = Schema.Literals(["resume", "preferences", "source", "firstRun"]);
+export type OnboardingStep = typeof OnboardingStep.Type;
+
+// GET /api/overview's `onboarding`, also returned by POST /api/onboarding/{complete,dismiss,restore}.
+export const Onboarding = Schema.Struct({
+  steps: Schema.Struct({
+    resume: Schema.Boolean,
+    preferences: Schema.Boolean,
+    source: Schema.Boolean,
+    firstRun: Schema.Boolean,
+  }),
+  // Where the wizard starts: the first incomplete required step (resume, source, firstRun),
+  // except that "preferences" comes before "source" while neither is done. Null when resume,
+  // source and firstRun are all done.
+  nextStep: Schema.NullOr(OnboardingStep),
+  // When the user finished the wizard, or their first run started. Null until then.
+  completedAt: Schema.NullOr(Schema.String),
+  // When the user hid the setup checklist. Null while it shows.
+  dismissedAt: Schema.NullOr(Schema.String),
+});
+export type Onboarding = typeof Onboarding.Type;
+
 // GET /api/overview: what the home page shows. Dates are ISO 8601 strings, as JSON carries them.
 export const Overview = Schema.Struct({
   setup: Schema.Struct({
@@ -222,5 +250,6 @@ export const Overview = Schema.Struct({
   pendingMatches: NonNegativeInt,
   // Null when scheduled checks are off.
   nextScheduledRunAt: Schema.NullOr(Schema.String),
+  onboarding: Onboarding,
 });
 export type Overview = typeof Overview.Type;

@@ -16,6 +16,12 @@ const empty = {
   activeRun: null,
   pendingMatches: 0,
   nextScheduledRunAt: null,
+  onboarding: {
+    steps: { resume: false, preferences: false, source: false, firstRun: false },
+    nextStep: "resume",
+    completedAt: null,
+    dismissedAt: null,
+  },
 };
 
 describe("overview", () => {
@@ -109,6 +115,13 @@ describe("overview", () => {
       activeRun: null,
       pendingMatches: 1,
       nextScheduledRunAt: null,
+      // The run was added directly, not started through createRun, so nothing completed setup.
+      onboarding: {
+        steps: { resume: true, preferences: false, source: true, firstRun: true },
+        nextStep: null,
+        completedAt: null,
+        dismissedAt: null,
+      },
     });
 
     expect((await bob.get("/api/overview").expect(200)).body).toEqual({
@@ -123,6 +136,12 @@ describe("overview", () => {
       activeRun: { id: bobRun.id, status: "RUNNING" },
       pendingMatches: 2,
       nextScheduledRunAt: null,
+      onboarding: {
+        steps: { resume: false, preferences: false, source: true, firstRun: true },
+        nextStep: "resume",
+        completedAt: null,
+        dismissedAt: null,
+      },
     });
   });
 
