@@ -1,0 +1,11 @@
+# Builds the images from this checkout instead of pulling the published ones:
+#   docker compose -f deploy/compose.yml -f deploy/compose.build.yml up -d --build
+services:
+  migrate:
+    build: { context: .., target: api }
+  api:
+    build: { context: .., target: api }
+  worker:
+    build: { context: .., target: api }
+  web:
+    build: { context: .., target: web, args: { API_URL: http://api:4000 } }

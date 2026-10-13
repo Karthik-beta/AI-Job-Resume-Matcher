@@ -54,15 +54,20 @@ jobs:
           path: test-results
 
   # Builds both Dockerfile targets and starts deploy/compose.yml on fixtures, to catch
-  # breakage that only shows up in the images.
+  # breakage that only shows up in the images. Then runs install.sh against those images.
   docker:
     machine:
       image: ubuntu-2404:current
     environment:
-      COMPOSE_FILE: deploy/compose.yml
+      COMPOSE_FILE: deploy/compose.yml:deploy/compose.build.yml
       WEB_PORT: 8080
     steps:
       - checkout
+      - run:
+          name: Lint install.sh
+          command: |
+            command -v shellcheck >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck; }
+            shellcheck install.sh
       - run:
           name: Write deploy/.env
           command: |
@@ -87,9 +92,93 @@ jobs:
             docker compose ps -a
             docker compose logs --no-color
           when: always
+      - run:
+          name: Install with install.sh on the images just built
+          command: |
+            # The installer uses the same project name, so drop this stack's volumes first.
+            docker compose down -v
+            for target in api web; do
+              docker tag "ghcr.io/karthik-beta/job-matcher-$target:latest" "ghcr.io/karthik-beta/job-matcher-$target:ci"
+            done
+            # Compose files come from this commit, as pushed to GitHub.
+            export JOB_MATCHER_NONINTERACTIVE=1 JOB_MATCHER_VERSION=ci JOB_MATCHER_REF="$CIRCLE_SHA1"
+            export JOB_MATCHER_DIR="$HOME/job-matcher"
+            sh install.sh
+            grep -q '^PROVIDERS=fake$' "$JOB_MATCHER_DIR/.env"
+            curl -fsS --retry 10 --retry-delay 2 --retry-all-errors \
+              "$(sed -n 's/^BETTER_AUTH_URL=//p' "$JOB_MATCHER_DIR/.env")/api/health"
+            # A second run is an upgrade: it keeps the generated settings.
+            cp "$JOB_MATCHER_DIR/.env" /tmp/env.before
+            sh install.sh
+            diff /tmp/env.before "$JOB_MATCHER_DIR/.env"
 
+  # Builds one architecture natively and pushes it as <version>-<arch>. Runs on release tags only.
+  publish:
+    parameters:
+      arch: { type: enum, enum: [amd64, arm64] }
+      resource_class: { type: string }
+    machine:
+      image: ubuntu-2404:current
+    resource_class: << parameters.resource_class >>
+    steps:
+      - checkout
+      - run:
+          name: Build and push << parameters.arch >> images
+          command: |
+            version="${CIRCLE_TAG#v}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            for target in api web; do
+              image="ghcr.io/karthik-beta/job-matcher-$target"
+              docker build --target "$target" \
+                --label "org.opencontainers.image.version=$version" \
+                --label "org.opencontainers.image.revision=$CIRCLE_SHA1" \
+                --tag "$image:$version-<< parameters.arch >>" .
+              docker push "$image:$version-<< parameters.arch >>"
+            done
+
+  # Joins the per-architecture images into multi-arch <version> and latest tags.
+  publish-manifest:
+    machine:
+      image: ubuntu-2404:current
+    steps:
+      - run:
+          name: Push multi-arch tags
+          command: |
+            version="${CIRCLE_TAG#v}"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            for target in api web; do
+              image="ghcr.io/karthik-beta/job-matcher-$target"
+              docker buildx imagetools create --tag "$image:$version" --tag "$image:latest" \
+                "$image:$version-amd64" "$image:$version-arm64"
+            done
+
+# Release tags (vX.Y.Z) also run the checks, and publish the images once they pass.
+# The `ghcr` context holds GHCR_USER and GHCR_TOKEN (a GitHub token with write:packages).
 workflows:
   ci:
     jobs:
-      - check
-      - docker
+      - check:
+          filters: &release_tags
+            tags: { only: /^v\d+\.\d+\.\d+$/ }
+      - docker:
+          filters: *release_tags
+      - publish:
+          name: publish-amd64
+          arch: amd64
+          resource_class: medium
+          context: ghcr
+          requires: [check, docker]
+          filters: &release_tags_only
+            tags: { only: /^v\d+\.\d+\.\d+$/ }
+            branches: { ignore: /.*/ }
+      - publish:
+          name: publish-arm64
+          arch: arm64
+          resource_class: arm.medium
+          context: ghcr
+          requires: [check, docker]
+          filters: *release_tags_only
+      - publish-manifest:
+          context: ghcr
+          requires: [publish-amd64, publish-arm64]
+          filters: *release_tags_only
