@@ -5,7 +5,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { cn } from "cn";
 import { useState } from "react";
 import { toast } from "sonner";
-import { SignedInPage } from "@/components/signed-in-page";
+import { AppPage } from "@/components/app-page";
 import { Button } from "@/components/ui/button";
 import { fetchMatches, type Match, setMatchStatus } from "@/lib/matches";
 
@@ -16,9 +16,9 @@ const tabs: { status: MatchStatus; label: string }[] = [
 
 export function MatchesView() {
   return (
-    <SignedInPage title="Matches">
+    <AppPage title="Matches">
       <Matches />
-    </SignedInPage>
+    </AppPage>
   );
 }
 

@@ -4,9 +4,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { AppPage } from "@/components/app-page";
 import { PastRuns } from "@/components/past-runs";
 import { RunCard } from "@/components/run-card";
-import { SignedInPage } from "@/components/signed-in-page";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
@@ -22,9 +22,9 @@ import {
 
 export function AnalyzeView() {
   return (
-    <SignedInPage title="Analyze">
+    <AppPage title="Analyze">
       <Analyze />
-    </SignedInPage>
+    </AppPage>
   );
 }
 
