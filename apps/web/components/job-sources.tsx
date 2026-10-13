@@ -8,7 +8,8 @@ import {
   UpdateJobSource,
 } from "@job-matcher/shared";
 import { Option, Schema } from "effect";
-import { type SubmitEvent, useEffect, useState } from "react";
+import { type SubmitEvent, useEffect, useRef, useState } from "react";
+import { SettingsSection } from "@/components/settings-section";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
@@ -39,8 +40,31 @@ function toSources(value: unknown): Source[] {
 // Search sources are created from a query, so they are not offered here.
 const editableKinds = SourceKind.literals.filter((kind) => kind !== "SEARCH");
 
-export function JobSources() {
+export type JobSource = Source;
+
+export function JobSources({
+  onAdded,
+  onChange,
+  className,
+}: {
+  // Called with each source the user adds.
+  onAdded?: ((source: JobSource) => void) | undefined;
+  // Called with the whole list once it loads and after every change.
+  onChange?: ((sources: readonly JobSource[]) => void) | undefined;
+  className?: string | undefined;
+}) {
   const [sources, setSources] = useState<Source[] | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (sources !== null) onChangeRef.current?.(sources);
+  }, [sources]);
+
+  function add(created: Source) {
+    setSources((current) => [created, ...(current ?? [])]);
+    onAdded?.(created);
+  }
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -62,7 +86,7 @@ export function JobSources() {
     setPending(true);
     try {
       const created = await api("/sources", { method: "POST", body: JSON.stringify(value) });
-      if (isSource(created)) setSources((current) => [created, ...(current ?? [])]);
+      if (isSource(created)) add(created);
       setUrl("");
     } catch (caught) {
       setError(caught instanceof ApiError ? caught.message : "Could not add the source.");
@@ -87,14 +111,12 @@ export function JobSources() {
   }
 
   return (
-    <section className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-2xl font-bold tracking-tight">Job sources</h2>
-        <p className="text-muted-foreground">
-          Careers pages and job boards to check on each run. Greenhouse, Lever, Ashby,
-          SmartRecruiters and Recruitee boards are read from their public APIs.
-        </p>
-      </div>
+    <SettingsSection
+      id="sources"
+      title="Job sources"
+      description="Careers pages and job boards to check on each run. Greenhouse, Lever, Ashby, SmartRecruiters and Recruitee boards are read from their public APIs."
+      className={className}
+    >
       <form onSubmit={onSubmit} className="flex flex-col gap-2">
         <Field data-invalid={error !== null}>
           <FieldLabel htmlFor="source-url">Careers page URL</FieldLabel>
@@ -113,7 +135,7 @@ export function JobSources() {
           {error && <FieldError>{error}</FieldError>}
         </Field>
       </form>
-      <SearchForm onAdded={(created) => setSources((current) => [created, ...(current ?? [])])} />
+      <SearchForm onAdded={add} />
       {sources !== null &&
         (sources.length === 0 ? (
           <p className="text-muted-foreground">
@@ -131,7 +153,7 @@ export function JobSources() {
             ))}
           </ul>
         ))}
-    </section>
+    </SettingsSection>
   );
 }
 
