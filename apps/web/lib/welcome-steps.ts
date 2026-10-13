@@ -28,16 +28,30 @@ export function done(step: WizardStep, steps: Steps) {
   return steps[step];
 }
 
+// The step setup continues at: the first missing required step, with the optional matching
+// step offered in order after the resume, unless the user chose to keep the defaults. Mirrors
+// the API's `nextStep`, which can't know about that choice (it is remembered in the browser).
+export function nextStepOf(steps: Steps, skippedPreferences = false): Onboarding["nextStep"] {
+  if (!steps.resume) return "resume";
+  if (!steps.source) return steps.preferences || skippedPreferences ? "source" : "preferences";
+  if (!steps.firstRun) return "firstRun";
+  return null;
+}
+
 // Where the wizard opens without a step in the URL: the welcome for someone who has done
-// nothing yet, otherwise the step the API says comes next (the first run once all is set).
-export function startStep({ steps, nextStep }: Onboarding): WizardStep {
+// nothing yet, otherwise the next step (the first run once all is set).
+export function startStep({ steps }: Onboarding, skippedPreferences = false): WizardStep {
   if (!done("welcome", steps)) return "welcome";
-  return nextStep ?? "firstRun";
+  return nextStepOf(steps, skippedPreferences) ?? "firstRun";
 }
 
 // The step to show for the URL's `step`: it when known and reachable, otherwise the start step.
-export function resolveStep(requested: string | null, onboarding: Onboarding): WizardStep {
+export function resolveStep(
+  requested: string | null,
+  onboarding: Onboarding,
+  skippedPreferences = false,
+): WizardStep {
   return isWizardStep(requested) && reachable(requested, onboarding.steps)
     ? requested
-    : startStep(onboarding);
+    : startStep(onboarding, skippedPreferences);
 }

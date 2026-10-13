@@ -2,7 +2,7 @@
 
 import { describe, expect, test } from "bun:test";
 import type { Onboarding } from "@job-matcher/shared";
-import { resolveStep } from "./welcome-steps";
+import { nextStepOf, resolveStep } from "./welcome-steps";
 
 const onboarding = (
   steps: Partial<Onboarding["steps"]>,
@@ -59,5 +59,37 @@ describe("resolveStep", () => {
     ["source", resumeOnly],
   ] as const)("revisits %p", (requested, state) => {
     expect(resolveStep(requested, state)).toBe(requested);
+  });
+});
+
+describe("after the user chose to keep the default matching settings", () => {
+  test.each([
+    [resumeOnly, "source"],
+    [withPreferences, "source"],
+    [ready, "firstRun"],
+  ] as const)("opens past the matching step", (state, expected) => {
+    expect(resolveStep(null, state, true)).toBe(expected);
+  });
+
+  test("still opens a new user at the welcome", () => {
+    expect(resolveStep(null, fresh, true)).toBe("welcome");
+  });
+
+  test("still lets them revisit the matching step", () => {
+    expect(resolveStep("preferences", resumeOnly, true)).toBe("preferences");
+  });
+});
+
+describe("nextStepOf", () => {
+  test.each([
+    [fresh, false, "resume"],
+    [fresh, true, "resume"],
+    [resumeOnly, false, "preferences"],
+    [resumeOnly, true, "source"],
+    [withPreferences, false, "source"],
+    [ready, false, "firstRun"],
+    [allDone, false, null],
+  ] as const)("matches the API's order (skipped matching: %#)", (state, skipped, expected) => {
+    expect(nextStepOf(state.steps, skipped)).toBe(expected);
   });
 });

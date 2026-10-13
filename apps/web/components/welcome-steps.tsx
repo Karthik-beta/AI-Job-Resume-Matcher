@@ -279,8 +279,8 @@ export function FirstRunStep({
         </li>
         <li>It usually takes a few minutes. You can leave the page while it runs.</li>
         <li>
-          Careers pages and searches use Firecrawl credits. Boards read from their public APIs use
-          none.
+          Careers pages and searches may use Firecrawl credits. Boards read from their public APIs
+          use none.
         </li>
       </ul>
       <StepActions onBack={onBack}>

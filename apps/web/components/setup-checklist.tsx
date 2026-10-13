@@ -2,12 +2,18 @@
 
 import { CheckCircle2, Circle } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useDismissOnboarding } from "@/lib/onboarding";
+import {
+  useDismissOnboarding,
+  useSeenIncompleteOnboarding,
+  useSkippedPreferences,
+} from "@/lib/onboarding";
 import type { Overview } from "@/lib/overview";
+import { useDismissed } from "@/lib/user-flags";
+import { nextStepOf } from "@/lib/welcome-steps";
 
 type Onboarding = Overview["onboarding"];
 type Step = keyof Onboarding["steps"];
@@ -32,7 +38,9 @@ export function SetupChecklist({
   starting: boolean;
 }) {
   const dismiss = useDismissOnboarding();
-  const { steps, nextStep } = onboarding;
+  const skippedPreferences = useSkippedPreferences();
+  const { steps } = onboarding;
+  const nextStep = nextStepOf(steps, skippedPreferences.on);
   const doneCount = required.filter((item) => steps[item.step]).length;
   const canRun = steps.resume && steps.source;
 
@@ -104,34 +112,23 @@ export function SetupChecklist({
 }
 
 const allSetWindow = 24 * 60 * 60 * 1000;
-const ackKey = (userId: string) => `ajm:onboarding-all-set-seen:${userId}`;
-
-function readAck(userId: string) {
-  try {
-    return window.localStorage.getItem(ackKey(userId)) !== null;
-  } catch {
-    return false;
-  }
-}
 
 // Whether to show the one-time "You're all set" card: onboarding finished in the last day, the
-// checklist wasn't hidden, and this user hasn't closed the card in this browser yet.
-export function useAllSet(onboarding: Onboarding | undefined, userId: string | undefined) {
-  const [acked, setAcked] = useState<string | null>(null);
-  const recent =
+// checklist wasn't hidden, this browser saw the setup unfinished (so the user went through it,
+// rather than having it marked done for them), and they haven't closed the card yet.
+export function useAllSet(onboarding: Onboarding | undefined) {
+  const seenIncomplete = useSeenIncompleteOnboarding(onboarding);
+  const closed = useDismissed("onboarding-all-set");
+  const show =
     onboarding?.completedAt != null &&
     onboarding.dismissedAt === null &&
-    Date.now() - Date.parse(onboarding.completedAt) < allSetWindow;
-  const show = recent && userId !== undefined && acked !== userId && !readAck(userId);
+    Date.now() - Date.parse(onboarding.completedAt) < allSetWindow &&
+    seenIncomplete.on &&
+    !closed.dismissed;
 
   const acknowledge = () => {
-    if (!userId) return;
-    try {
-      window.localStorage.setItem(ackKey(userId), new Date().toISOString());
-    } catch {
-      // Storage is unavailable; the card still closes for this visit.
-    }
-    setAcked(userId);
+    closed.dismiss();
+    seenIncomplete.set(false);
   };
 
   return { show, acknowledge };

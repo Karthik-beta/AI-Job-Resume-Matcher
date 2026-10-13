@@ -13,7 +13,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
-import { authClient } from "@/lib/auth-client";
 import { type Overview, overviewKey, useOverview } from "@/lib/overview";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchSettings, fetchSources, isActive, startRun, useRun } from "@/lib/runs";
@@ -47,8 +46,7 @@ export function HomeView() {
 
 function Home() {
   const overview = useOverview();
-  const { data: session } = authClient.useSession();
-  const allSet = useAllSet(overview.data?.onboarding, session?.user.id);
+  const allSet = useAllSet(overview.data?.onboarding);
   const start = useStartRun();
 
   if (!overview.data) {

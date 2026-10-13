@@ -5,7 +5,7 @@ import { cn } from "cn";
 import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { AppPage } from "@/components/app-page";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -17,9 +17,11 @@ import {
   SourceStep,
   WelcomeStep,
 } from "@/components/welcome-steps";
+import { useSeenIncompleteOnboarding, useSkippedPreferences } from "@/lib/onboarding";
 import { type Overview, overviewKey, useOverview } from "@/lib/overview";
 import {
   done,
+  nextStepOf,
   reachable,
   resolveStep,
   type Steps,
@@ -30,7 +32,11 @@ import {
 export function WelcomeView() {
   return (
     <AppPage title="Get set up">
-      <Wizard />
+      {/* The step is read from the URL, so only the wizard waits for it; the title is part of
+          the prerendered shell. */}
+      <Suspense fallback={<WizardSkeleton />}>
+        <Wizard />
+      </Suspense>
     </AppPage>
   );
 }
@@ -41,11 +47,14 @@ function Wizard() {
   const queryClient = useQueryClient();
   const overview = useOverview();
   const data = overview.data;
+  const skippedPreferences = useSkippedPreferences();
+  useSeenIncompleteOnboarding(data?.onboarding);
 
-  // Whether setup was already finished when the page opened. Decided once, so starting the
-  // first run (which completes setup) doesn't send the user home instead of to the run.
+  // Whether setup was already finished when the page opened. Decided once, from an overview
+  // fetched since the page opened (a cached one may be a minute old), so starting the first run
+  // (which completes setup) doesn't send the user home instead of to the run.
   const [finishedOnArrival, setFinishedOnArrival] = useState<boolean | null>(null);
-  if (data && finishedOnArrival === null) {
+  if (data && overview.isFetchedAfterMount && finishedOnArrival === null) {
     setFinishedOnArrival(data.onboarding.completedAt !== null);
   }
   useEffect(() => {
@@ -55,7 +64,12 @@ function Wizard() {
   // The step lives in the URL so refresh and the browser's back button keep it. A missing,
   // unknown or not yet reachable step is replaced by the one the user should be on.
   const requested = searchParams.get("step");
-  const step = data ? resolveStep(requested, data.onboarding) : null;
+  // The step also depends on whether the user kept the default matching settings, which is
+  // known once the session is.
+  const step =
+    data && skippedPreferences.ready
+      ? resolveStep(requested, data.onboarding, skippedPreferences.on)
+      : null;
   useEffect(() => {
     if (finishedOnArrival === false && step && requested !== step) {
       router.replace(`/welcome?step=${step}`, { scroll: false });
@@ -93,20 +107,30 @@ function Wizard() {
   const go = (next: WizardStep) => router.push(`/welcome?step=${next}`, { scroll: false });
 
   // Saved changes are written into the cached overview before moving on, so the next step is
-  // reachable at once rather than after the overview is refetched.
-  const markStep = (key: keyof Steps, value: boolean, sourceCount?: number) =>
-    queryClient.setQueryData<Overview>(overviewKey, (current) =>
-      current
-        ? {
-            ...current,
-            setup: sourceCount === undefined ? current.setup : { ...current.setup, sourceCount },
-            onboarding: {
-              ...current.onboarding,
-              steps: { ...current.onboarding.steps, [key]: value },
-            },
-          }
-        : current,
-    );
+  // reachable at once rather than after the overview is refetched. A fetch already in flight is
+  // cancelled first, so its older answer can't overwrite the change; the overview is then
+  // refetched for everything else.
+  const markStep = async (change: { resume: boolean } | { sourceCount: number }) => {
+    await queryClient.cancelQueries({ queryKey: overviewKey });
+    queryClient.setQueryData<Overview>(overviewKey, (current) => {
+      if (!current) return current;
+      const setup =
+        "resume" in change
+          ? { ...current.setup, hasResume: change.resume }
+          : { ...current.setup, sourceCount: change.sourceCount };
+      const steps = {
+        ...current.onboarding.steps,
+        resume: setup.hasResume,
+        source: setup.sourceCount > 0,
+      };
+      return {
+        ...current,
+        setup,
+        onboarding: { ...current.onboarding, steps, nextStep: nextStepOf(steps) },
+      };
+    });
+    void queryClient.invalidateQueries({ queryKey: overviewKey });
+  };
 
   const index = wizardSteps.findIndex(({ id }) => id === step);
   const current = wizardSteps[index] ?? wizardSteps[0];
@@ -127,8 +151,8 @@ function Wizard() {
         {step === "resume" && (
           <ResumeStep
             saved={steps.resume}
-            onSaved={(settings) => {
-              markStep("resume", settings.resumeUrl !== null);
+            onSaved={async (settings) => {
+              await markStep({ resume: settings.resumeUrl !== null });
               if (settings.resumeUrl !== null) go("preferences");
             }}
             onBack={() => go("welcome")}
@@ -139,13 +163,16 @@ function Wizard() {
           <PreferencesStep
             onSaved={() => go("source")}
             onBack={() => go("resume")}
-            onSkip={() => go("source")}
+            onSkip={() => {
+              skippedPreferences.set(true);
+              go("source");
+            }}
           />
         )}
         {step === "source" && (
           <SourceStep
             hasSource={steps.source}
-            onChange={(sources) => markStep("source", sources.length > 0, sources.length)}
+            onChange={(sources) => void markStep({ sourceCount: sources.length })}
             onBack={() => go("preferences")}
             onNext={() => go("firstRun")}
           />

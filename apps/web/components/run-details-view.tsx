@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { AppPage } from "@/components/app-page";
 import { FirstRunExplainer } from "@/components/first-run-explainer";
 import { RunCard } from "@/components/run-card";
@@ -12,10 +13,13 @@ import { ApiError } from "@/lib/api";
 import { fetchRuns, fetchSettings, isActive, type RunDetail, useRun } from "@/lib/runs";
 
 export function RunDetailsView() {
-  const { id } = useParams<{ id: string }>();
   return (
     <AppPage title="Run details">
-      <RunDetails id={id} />
+      {/* The run id and whether it's the first run are read from the URL, so only the details
+          wait for them; the title is part of the prerendered shell. */}
+      <Suspense>
+        <RunDetails />
+      </Suspense>
     </AppPage>
   );
 }
@@ -28,7 +32,8 @@ function useIsFirstRun(id: string) {
   return first || (runs.data?.length === 1 && runs.data[0]?.id === id);
 }
 
-function RunDetails({ id }: { id: string }) {
+function RunDetails() {
+  const { id } = useParams<{ id: string }>();
   const run = useRun(id);
   const settings = useQuery({ queryKey: ["settings"], queryFn: fetchSettings });
   const firstRun = useIsFirstRun(id);
@@ -64,6 +69,11 @@ const linkClass = "font-medium text-foreground underline underline-offset-4";
 function RunOutcome({ run }: { run: RunDetail }) {
   if (isActive(run.status) || run.status === "FAILED") return null;
   const matches = run.results.filter((result) => result.isMatch === true).length;
+  // Title ranking skipped every new job, so none was read.
+  const allTriaged =
+    run.checked === 0 &&
+    run.results.length > 0 &&
+    run.results.every((result) => result.skipped === "TRIAGE");
 
   if (matches > 0) {
     return (
@@ -84,7 +94,21 @@ function RunOutcome({ run }: { run: RunDetail }) {
     <div className="rounded-lg bg-muted px-4 py-3 text-sm leading-relaxed">
       <p className="font-medium">No matches this time</p>
       <p className="text-muted-foreground">
-        {run.found === 0 ? (
+        {allTriaged ? (
+          <>
+            Title ranking judged the titles of all {run.results.length} new{" "}
+            {run.results.length === 1 ? "job" : "jobs"} unlikely to fit your resume, so none were
+            read. Try{" "}
+            <Link href="/settings#sources" className={linkClass}>
+              more sources
+            </Link>{" "}
+            or turn off{" "}
+            <Link href="/settings#runs" className={linkClass}>
+              title ranking
+            </Link>
+            .
+          </>
+        ) : run.found === 0 ? (
           <>
             Your sources listed no jobs. Check their URLs or{" "}
             <Link href="/settings#sources" className={linkClass}>

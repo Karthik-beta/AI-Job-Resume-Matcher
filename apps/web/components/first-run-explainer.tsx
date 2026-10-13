@@ -1,8 +1,10 @@
+"use client";
+
 import { X } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useDismissed } from "@/lib/dismissed";
+import { useDismissed } from "@/lib/user-flags";
 
 // The statuses and numbers the run card shows, in the order a run goes through them.
 const stages: { term: string; meaning: string }[] = [
@@ -19,7 +21,8 @@ const stages: { term: string; meaning: string }[] = [
   },
   {
     term: "Failed",
-    meaning: "Jobs that couldn't be read or checked. They're tried again on your next run.",
+    meaning:
+      "Jobs that couldn't be read or checked, which are tried again on your next run, and matches that couldn't be saved, which you can save from this page with Retry saving match.",
   },
   {
     term: "Stopped",

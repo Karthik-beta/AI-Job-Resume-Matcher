@@ -1,8 +1,27 @@
+import type { ComponentProps } from "react";
 import { Badge } from "@/components/ui/badge";
 
 export type Verdict = "match" | "no-match" | "failed" | "checking" | "expired" | "skipped";
 
-// What each verdict means, shown as the badge's tooltip.
+// A badge with a short explanation: a tooltip for the mouse, and text that screen readers read
+// after the label. The explanation sits beside the badge, not in it, so the badge's own text
+// stays just its label.
+export function HintBadge({
+  hint,
+  children,
+  ...props
+}: ComponentProps<typeof Badge> & { hint: string }) {
+  return (
+    <>
+      <Badge title={hint} {...props}>
+        {children}
+      </Badge>
+      <span className="sr-only">({hint})</span>
+    </>
+  );
+}
+
+// What each verdict means.
 const hints: Record<Verdict, string> = {
   match: "The job ad fits your resume and preferences",
   "no-match": "The job ad doesn't fit closely enough; the reason says why",
@@ -13,43 +32,43 @@ const hints: Record<Verdict, string> = {
 };
 
 export function VerdictBadge({ verdict }: { verdict: Verdict }) {
-  const title = hints[verdict];
+  const hint = hints[verdict];
   switch (verdict) {
     case "match":
       return (
-        <Badge className="bg-match text-primary-foreground" title={title}>
+        <HintBadge className="bg-match text-primary-foreground" hint={hint}>
           Match
-        </Badge>
+        </HintBadge>
       );
     case "no-match":
       return (
-        <Badge variant="outline" title={title}>
+        <HintBadge variant="outline" hint={hint}>
           No match
-        </Badge>
+        </HintBadge>
       );
     case "skipped":
       return (
-        <Badge variant="secondary" title={title}>
+        <HintBadge variant="secondary" hint={hint}>
           Skipped
-        </Badge>
+        </HintBadge>
       );
     case "expired":
       return (
-        <Badge variant="outline" title={title}>
+        <HintBadge variant="outline" hint={hint}>
           Expired
-        </Badge>
+        </HintBadge>
       );
     case "failed":
       return (
-        <Badge variant="destructive" title={title}>
+        <HintBadge variant="destructive" hint={hint}>
           Couldn't check
-        </Badge>
+        </HintBadge>
       );
     case "checking":
       return (
-        <Badge variant="secondary" className="motion-safe:animate-pulse" title={title}>
+        <HintBadge variant="secondary" className="motion-safe:animate-pulse" hint={hint}>
           Checking
-        </Badge>
+        </HintBadge>
       );
   }
 }

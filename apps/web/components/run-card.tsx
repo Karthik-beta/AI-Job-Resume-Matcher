@@ -1,9 +1,8 @@
 import { RetrySaveButton } from "@/components/retry-save-button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { type Verdict, VerdictBadge } from "@/components/verdict-badge";
+import { HintBadge, type Verdict, VerdictBadge } from "@/components/verdict-badge";
 import {
   isActive,
   type JobResult,
@@ -20,7 +19,7 @@ export const statusLabels: Record<RunStatus, string> = {
   FAILED: "Failed",
 };
 
-// How the job's ad was read, with a plain explanation for the badge's tooltip.
+// How the job's ad was read, with a plain explanation shown with the badge.
 const scrapedViaLabels: Record<ScrapeVia, { label: string; hint: string }> = {
   ATS: { label: "From job board", hint: "Read from the job board's public listings, at no cost" },
   CACHE: { label: "Saved copy", hint: "Read from a copy saved on an earlier run, at no cost" },
@@ -142,9 +141,12 @@ export function RunCard({ run, maxJobsPerRun }: { run: RunDetail; maxJobsPerRun:
                     </div>
                     <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                       {result.scrapedVia && (
-                        <Badge variant="outline" title={scrapedViaLabels[result.scrapedVia].hint}>
+                        <HintBadge
+                          variant="outline"
+                          hint={scrapedViaLabels[result.scrapedVia].hint}
+                        >
                           {scrapedViaLabels[result.scrapedVia].label}
-                        </Badge>
+                        </HintBadge>
                       )}
                       <VerdictBadge verdict={verdictOf(result)} />
                     </div>
