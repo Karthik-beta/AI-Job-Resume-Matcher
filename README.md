@@ -14,6 +14,8 @@
   <img src="https://img.shields.io/badge/self--hosted-Docker-2496ed" alt="Self-hosted with Docker">
 </p>
 
+Job Matcher is a self-hosted AI job search tool. It scrapes the careers pages and job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM.
+
 ![Landing page](docs/screenshots/home.png)
 
 ## What it does
