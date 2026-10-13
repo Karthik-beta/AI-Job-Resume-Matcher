@@ -82,7 +82,8 @@ const jobHtml: Record<string, string> = {
   }),
 };
 
-type Verdict = "match" | "no match" | "invalid" | "auth";
+// "interrupted" also ends the run, as recovery does when another worker gets its job.
+type Verdict = "match" | "no match" | "invalid" | "auth" | "interrupted";
 
 // Each scrape costs a credit, refused as the router refuses it in cloud mode.
 const spendCredit = Effect.gen(function* () {
@@ -194,6 +195,13 @@ describe("process run", () => {
           return Effect.fail(new MatchOutputInvalid({ message: "Bad output" }));
         case "auth":
           return Effect.fail(new OpenRouterAuthError({ status: 401, message: "User not found." }));
+        case "interrupted":
+          return Effect.promise(() =>
+            prisma.run.update({
+              where: { id: runId },
+              data: { status: "FAILED", stopReason: interruptedReason },
+            }),
+          ).pipe(Effect.as({ isMatch: false, reason: "Missing skills" }));
       }
     };
     const layer = Layer.mergeAll(
@@ -806,5 +814,16 @@ describe("process run", () => {
     expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, checked: 1 });
     expect(run.finishedAt).not.toBeNull();
     expect(await prisma.jobResult.count({ where: { runId } })).toBe(1);
+  });
+
+  it("stops checking jobs once recovery has ended the run", async () => {
+    const { run, evaluated } = await runWith(await startRun(), {
+      resumeHash: "resume-interrupted",
+      verdicts: { [jobUrl("1")]: "interrupted" },
+    });
+
+    expect(evaluated).toEqual([jobUrl("1")]);
+    // The job already checked is saved, and the reason recovery gave is kept.
+    expect(run).toMatchObject({ status: "FAILED", stopReason: interruptedReason, checked: 1 });
   });
 });

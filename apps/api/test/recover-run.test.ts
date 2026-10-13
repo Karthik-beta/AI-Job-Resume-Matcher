@@ -12,20 +12,25 @@ describe("interrupted runs", () => {
   const prisma = new PrismaService();
   const userId = `test-${crypto.randomUUID()}`;
   let sourceId: string;
+  const runIds = new Set<string>();
 
   const addRun = async (status: RunStatus) => {
     const run = await prisma.run.create({
       data: { userId, trigger: "MANUAL", contextKey: "test", sourceIds: [sourceId], status },
     });
+    runIds.add(run.id);
     return run.id;
   };
   const runOf = (id: string) => prisma.run.findUniqueOrThrow({ where: { id } });
 
-  // A queue holding jobs in the given states; a run without one has no job.
+  // A queue holding this test's jobs in the given states; a test run without one has no job. Runs
+  // from elsewhere in the shared database report active, so recovery leaves them alone.
   const queueWith = (states: Record<string, string>) =>
     ({
-      getJob: (id: string) =>
-        Promise.resolve(states[id] ? { getState: () => Promise.resolve(states[id]) } : undefined),
+      getJob: (id: string) => {
+        const state = runIds.has(id) ? states[id] : "active";
+        return Promise.resolve(state ? { getState: () => Promise.resolve(state) } : undefined);
+      },
     }) as unknown as Queue;
 
   beforeAll(async () => {
@@ -69,17 +74,16 @@ describe("interrupted runs", () => {
 
     await recoverOrphanedRuns(queueWith({}), prisma);
     expect((await createRun(prisma, options))._tag).toBe("Created");
-    await prisma.run.updateMany({ where: { userId }, data: { status: "COMPLETED" } });
   });
 
   describe("when BullMQ fails a run's job", () => {
     const processor = new RunsProcessor(prisma, {} as EffectRuntime, {} as Queue);
-    const fail = (runId: string, message: string) =>
-      processor.onFailed({ data: { runId } } as Job<RunJob>, new Error(message));
+    const fail = (runId: string, message: string, stalledCounter = 0) =>
+      processor.onFailed({ data: { runId }, stalledCounter } as Job<RunJob>, new Error(message));
 
     it("ends a run whose job stalled too often as interrupted", async () => {
       const runId = await addRun("RUNNING");
-      await fail(runId, "job stalled more than allowable limit");
+      await fail(runId, "job stalled more than allowable limit", 2);
 
       expect(await runOf(runId)).toMatchObject({ status: "FAILED", stopReason: interruptedReason });
     });
@@ -100,12 +104,22 @@ describe("interrupted runs", () => {
         where: { id: runId },
         data: { status: "STOPPED", stopReason: "User not found." },
       });
-      await fail(runId, "job stalled more than allowable limit");
+      await fail(runId, "job stalled more than allowable limit", 2);
 
       expect(await runOf(runId)).toMatchObject({
         status: "STOPPED",
         stopReason: "User not found.",
       });
+    });
+
+    it("logs instead of throwing when the run cannot be ended", async () => {
+      const down = {
+        run: { updateMany: () => Promise.reject(new Error("Database is down")) },
+      } as unknown as PrismaService;
+      const offline = new RunsProcessor(down, {} as EffectRuntime, {} as Queue);
+      const job = { data: { runId: "missing" }, stalledCounter: 2 } as Job<RunJob>;
+
+      await expect(offline.onFailed(job, new Error("stalled"))).resolves.toBeUndefined();
     });
   });
 });

@@ -316,6 +316,12 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     }
 
     for (const job of selected) {
+      // A worker that lost the job while still alive stops once recovery has ended its run, so the
+      // run's jobs are not analysed twice alongside a newer run.
+      const current = yield* query(() =>
+        prisma.run.findUniqueOrThrow({ where: { id: runId }, select: { status: true } }),
+      );
+      if (current.status !== "RUNNING") return;
       // Kept when the evaluation fails after the page was read.
       let scrapedVia: ScrapeVia | null = null;
       const outcome = yield* jobPageFor(userId, job, kindOf(job)).pipe(

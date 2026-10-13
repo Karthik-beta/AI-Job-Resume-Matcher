@@ -26,8 +26,13 @@ export class RunsProcessor extends WorkerHost implements OnApplicationBootstrap 
   // Restores schedulers from settings, in case a save stored the schedule but Redis was down,
   // and ends runs a stopped worker left RUNNING without a job to recover them.
   async onApplicationBootstrap() {
-    const recovered = await recoverOrphanedRuns(this.queue, this.prisma);
-    if (recovered > 0) this.logger.warn(`Marked ${recovered} interrupted run(s) as failed`);
+    // Best effort: a failed check must not stop the worker or the schedules from starting.
+    try {
+      const recovered = await recoverOrphanedRuns(this.queue, this.prisma);
+      if (recovered > 0) this.logger.warn(`Marked ${recovered} interrupted run(s) as failed`);
+    } catch (error) {
+      this.logger.error(`Could not check for interrupted runs: ${error}`);
+    }
     const scheduled = await this.prisma.settings.findMany({
       where: { scheduleMinutes: { not: null } },
       select: { userId: true, scheduleMinutes: true },
@@ -42,10 +47,15 @@ export class RunsProcessor extends WorkerHost implements OnApplicationBootstrap 
   @OnWorkerEvent("failed")
   async onFailed(job: Job<RunJob | ScheduledJob> | undefined, error: Error) {
     if (!job || !("runId" in job.data)) return;
-    const reason = error.message.includes("stalled")
-      ? interruptedReason
-      : "The run failed unexpectedly";
-    await failActiveRun(this.prisma, job.data.runId, reason);
+    const reason = job.stalledCounter > 0 ? interruptedReason : "The run failed unexpectedly";
+    // Event handlers are not awaited, so an error here would be an unhandled rejection.
+    try {
+      await failActiveRun(this.prisma, job.data.runId, reason);
+    } catch (cause) {
+      this.logger.error(
+        `Could not end run ${job.data.runId} after its job failed (${error.message}): ${cause}`,
+      );
+    }
   }
 
   async process(job: Job<RunJob | ScheduledJob>) {
