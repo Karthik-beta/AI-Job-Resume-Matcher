@@ -1,4 +1,6 @@
-# Job Matcher
+<p align="center"><img src="docs/logo.svg" width="72" height="72" alt=""></p>
+
+<h1 align="center">Job Matcher</h1>
 
 Scrapes the job boards you follow, filters listings by location and experience, and checks each remaining job against your resume with an LLM. Matches are saved for you to track, and can be posted to Discord.
 
@@ -13,11 +15,18 @@ WEB_PORT=8080 docker compose -f deploy/compose.yml up -d --build
 
 Then open http://localhost:8080, sign up, add any careers page URL and a resume URL in Settings, and press Analyze.
 
+![Landing page](docs/screenshots/home.png)
+
 | Analyze | Matches |
 | --- | --- |
 | ![A completed run with two matches](docs/screenshots/analyze.png) | ![Pending matches with a Mark applied button](docs/screenshots/matches.png) |
 
-![Landing page](docs/screenshots/home.png)
+<details>
+<summary>Settings</summary>
+
+![Job sources and matching preferences](docs/screenshots/settings.png)
+
+</details>
 
 ## Architecture
 
