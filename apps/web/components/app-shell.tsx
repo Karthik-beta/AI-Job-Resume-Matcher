@@ -82,12 +82,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   // session can then change from one user to another without ever being empty.
   const userId = session?.user.id ?? null;
   const [shownUserId, setShownUserId] = useState<string | null>(null);
+  // Goes up when the user changes, not on the first sign-in, so only a switch remounts the pages.
+  const [accountSwitches, setAccountSwitches] = useState(0);
 
   useEffect(() => {
     if (userId === null || userId === shownUserId) return;
     // The previous user's cached data and form state must not reach the new user's pages, or a
     // save could write it to the new account.
-    if (shownUserId !== null) queryClient.clear();
+    if (shownUserId !== null) {
+      queryClient.clear();
+      setAccountSwitches((count) => count + 1);
+    }
     setShownUserId(userId);
   }, [userId, shownUserId, queryClient]);
 
@@ -164,8 +169,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       {/* The page segment always renders, so Next can validate it; `AppPage` gates its content. */}
       <SessionGateContext value={gate}>
-        {/* Remounted for each user, so no page keeps state from the previous one. */}
-        <Fragment key={shownUserId}>{children}</Fragment>
+        {/* Remounted when the user changes, so no page keeps state from the previous one. */}
+        <Fragment key={accountSwitches}>{children}</Fragment>
       </SessionGateContext>
     </div>
   );
