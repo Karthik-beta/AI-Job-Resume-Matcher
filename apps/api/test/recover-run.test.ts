@@ -3,7 +3,13 @@ import type { Job, Queue } from "bullmq";
 import type { RunStatus } from "../src/generated/prisma/client";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { createRun } from "../src/runs/create-run";
-import { failActiveRun, interruptedReason, recoverOrphanedRuns } from "../src/runs/recover-run";
+import {
+  failActiveRun,
+  interruptedReason,
+  lostJobReason,
+  queueGraceMs,
+  recoverOrphanedRuns,
+} from "../src/runs/recover-run";
 import { RunsProcessor } from "../src/runs/runs.processor";
 import type { RunJob } from "../src/runs/runs.queue";
 import type { EffectRuntime } from "../src/worker/effect-runtime";
@@ -14,9 +20,16 @@ describe("interrupted runs", () => {
   let sourceId: string;
   const runIds = new Set<string>();
 
-  const addRun = async (status: RunStatus) => {
+  const addRun = async (status: RunStatus, createdAt = new Date()) => {
     const run = await prisma.run.create({
-      data: { userId, trigger: "MANUAL", contextKey: "test", sourceIds: [sourceId], status },
+      data: {
+        userId,
+        trigger: "MANUAL",
+        contextKey: "test",
+        sourceIds: [sourceId],
+        status,
+        createdAt,
+      },
     });
     runIds.add(run.id);
     return run.id;
@@ -74,6 +87,37 @@ describe("interrupted runs", () => {
 
     await recoverOrphanedRuns(queueWith({}), prisma);
     expect((await createRun(prisma, options))._tag).toBe("Created");
+  });
+
+  it("ends QUEUED runs whose job never arrived once the grace period has passed", async () => {
+    const queuedAt = new Date(Date.now() - queueGraceMs - 1_000);
+    const lost = await addRun("QUEUED", queuedAt);
+    const waiting = await addRun("QUEUED", queuedAt);
+    const fresh = await addRun("QUEUED");
+    const queue = queueWith({ [waiting]: "waiting" });
+
+    expect(await recoverOrphanedRuns(queue, prisma)).toBe(1);
+    const run = await runOf(lost);
+    expect(run).toMatchObject({ status: "FAILED", stopReason: lostJobReason });
+    expect(run.finishedAt).not.toBeNull();
+    // One is still waiting for a worker, and the other may be getting its job right now.
+    expect((await runOf(waiting)).status).toBe("QUEUED");
+    expect((await runOf(fresh)).status).toBe("QUEUED");
+
+    // Once the fresh run is past the grace period without a job, it is ended too.
+    const later = new Date(Date.now() + queueGraceMs + 1_000);
+    expect(await recoverOrphanedRuns(queue, prisma, { now: later })).toBe(1);
+    expect((await runOf(fresh)).status).toBe("FAILED");
+    await failActiveRun(prisma, waiting);
+  });
+
+  it("checks only the given user's runs", async () => {
+    const lost = await addRun("RUNNING");
+
+    expect(await recoverOrphanedRuns(queueWith({}), prisma, { userId: "someone-else" })).toBe(0);
+    expect((await runOf(lost)).status).toBe("RUNNING");
+    expect(await recoverOrphanedRuns(queueWith({}), prisma, { userId })).toBe(1);
+    expect((await runOf(lost)).status).toBe("FAILED");
   });
 
   describe("when BullMQ fails a run's job", () => {

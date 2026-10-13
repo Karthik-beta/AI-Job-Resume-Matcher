@@ -71,7 +71,9 @@ export class RunsProcessor extends WorkerHost implements OnApplicationBootstrap 
       return;
     }
     // The tick queues an ordinary run job, so a run is never left QUEUED without a job.
-    // It is skipped while a run is active or before the user has a resume and sources.
+    // It is skipped while a run is active or before the user has a resume and sources. A run that
+    // lost its job is ended first, so it does not hold up the schedule.
+    await recoverOrphanedRuns(this.queue, this.prisma, { userId });
     const run = await createScheduledRun(this.prisma, userId, config.OPENROUTER_MODEL);
     if (run) await enqueueRun(this.queue, this.prisma, run.id);
   }

@@ -25,7 +25,7 @@ import {
   scrapeSourceListings,
 } from "../matching/page-cache";
 import type { PdfParser } from "../matching/pdf";
-import { acceptsJob } from "../matching/requirements";
+import { acceptsJob, rulesOutJob } from "../matching/requirements";
 import { ResumeSource } from "../matching/resume-source";
 import { FirecrawlPlan, RunCloudBudget, ScrapeHealth } from "../matching/scrape-router";
 import type { HostLimiter } from "../matching/sources/http";
@@ -76,6 +76,14 @@ const expired: Verdict = {
 const unsuitable: Verdict = {
   isMatch: false,
   reason: "Doesn't meet your requirements (from the job page's structured data)",
+  skipped: null,
+};
+
+// Only the page's structured data is checked, so a page may state in its text what is missing.
+const unknownDetails: Verdict = {
+  isMatch: false,
+  reason:
+    "The job page's structured data doesn't state its location or experience, and you excluded jobs with unknown details",
   skipped: null,
 };
 
@@ -240,8 +248,9 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
     const { resume, listings, kindByUrl } = prepared.success;
     const kindOf = (job: Listing) => kindByUrl.get(canonicalUrl(job.url)) ?? "PAGE";
 
+    // Details a listing leaves out are checked once its job page has been read.
     const eligible = listings.filter(
-      (listing) => acceptsJob(requirements, listing) && acceptsTitle(titleFilters, listing.title),
+      (listing) => !rulesOutJob(requirements, listing) && acceptsTitle(titleFilters, listing.title),
     );
     // The run was created before the resume content was known, so its key is replaced here.
     const contextKey = contextKeyOf({
@@ -338,7 +347,10 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
               return { enriched, verdict: expired };
             }
             // The page can say what the listing did not, such as its location.
-            if (!acceptsJob(requirements, enriched)) return { enriched, verdict: unsuitable };
+            if (!acceptsJob(requirements, enriched)) {
+              const verdict = rulesOutJob(requirements, enriched) ? unsuitable : unknownDetails;
+              return { enriched, verdict };
+            }
             const verdict = yield* evaluator.evaluate({
               resume: resume.text,
               resumeHash: resume.hash,

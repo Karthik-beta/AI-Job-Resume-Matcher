@@ -103,14 +103,20 @@ jobs:
             # Compose files come from this commit, as pushed to GitHub.
             export JOB_MATCHER_NONINTERACTIVE=1 JOB_MATCHER_VERSION=ci JOB_MATCHER_REF="$CIRCLE_SHA1"
             export JOB_MATCHER_DIR="$HOME/job-matcher"
+            # Under umask 022 a new file is readable by everyone; .env must still end up 600.
+            umask 022
             sh install.sh
+            test "$(stat -c %a "$JOB_MATCHER_DIR/.env")" = 600
             grep -q '^PROVIDERS=fake$' "$JOB_MATCHER_DIR/.env"
             curl -fsS --retry 10 --retry-delay 2 --retry-all-errors \
               "$(sed -n 's/^BETTER_AUTH_URL=//p' "$JOB_MATCHER_DIR/.env")/api/health"
-            # A second run is an upgrade: it keeps the generated settings.
+            # A second run is an upgrade: it keeps the generated settings, and tightens a .env that
+            # an earlier install left readable by everyone.
             cp "$JOB_MATCHER_DIR/.env" /tmp/env.before
+            chmod 644 "$JOB_MATCHER_DIR/.env"
             sh install.sh
             diff /tmp/env.before "$JOB_MATCHER_DIR/.env"
+            test "$(stat -c %a "$JOB_MATCHER_DIR/.env")" = 600
 
   # Builds one architecture natively and pushes it as <version>-<arch>. Runs on release tags only.
   publish:

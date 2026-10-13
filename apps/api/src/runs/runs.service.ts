@@ -11,12 +11,15 @@ import { config } from "../config";
 import { PrismaService } from "../prisma/prisma.service";
 import { createRun } from "./create-run";
 import { MatchAlerts } from "./match-alerts";
+import { recoverOrphanedRuns } from "./recover-run";
 import { runPageUrl } from "./run-page-url";
 import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
 import { upsertMatch } from "./save-match";
 import { enqueueRun } from "./schedule";
 
 const recentRuns = 20;
+// How long a start waits to end a run that lost its job before answering that one is active.
+export const recoveryTimeoutMs = 2_000;
 
 @Injectable()
 export class RunsService {
@@ -94,12 +97,18 @@ export class RunsService {
   }
 
   async start(userId: string, sourceIds: readonly string[]) {
-    const created = await createRun(this.prisma, {
-      userId,
-      sourceIds,
-      trigger: "MANUAL",
-      model: config.OPENROUTER_MODEL,
-    });
+    const create = () =>
+      createRun(this.prisma, {
+        userId,
+        sourceIds,
+        trigger: "MANUAL",
+        model: config.OPENROUTER_MODEL,
+      });
+    let created = await create();
+    // The active run may be one that lost its job. If ending it frees the user, start again.
+    if (created._tag === "AlreadyActive" && (await this.recoverLostRuns(userId)) > 0) {
+      created = await create();
+    }
     switch (created._tag) {
       case "NoResume":
         throw new BadRequestException("Add a resume URL in settings before starting a run");
@@ -114,5 +123,22 @@ export class RunsService {
       throw new ServiceUnavailableException("Could not queue the run. Try again shortly.");
     }
     return run;
+  }
+
+  // Best effort and bounded: the queue's connection waits for Redis instead of failing, so an
+  // outage would otherwise hold the request.
+  private async recoverLostRuns(userId: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<number>((resolve) => {
+      timer = setTimeout(() => resolve(0), recoveryTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        recoverOrphanedRuns(this.queue, this.prisma, { userId }).catch(() => 0),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }

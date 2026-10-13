@@ -72,10 +72,16 @@ ask() { # prompt -> stdout
 
 set_env() { # key value: replace the key's line in .env
   tmp="$DIR/.env.tmp"
-  awk -v k="$1" -v v="$2" 'BEGIN { done = 0 }
-    index($0, k "=") == 1 { print k "=" v; done = 1; next }
-    { print }
-    END { if (!done) print k "=" v }' "$DIR/.env" >"$tmp"
+  # .env holds secrets, and mv gives it the temp file's mode, so the temp file is created
+  # readable by its owner only. A leftover one may have other permissions, so it goes first.
+  rm -f "$tmp"
+  (
+    umask 077
+    awk -v k="$1" -v v="$2" 'BEGIN { done = 0 }
+      index($0, k "=") == 1 { print k "=" v; done = 1; next }
+      { print }
+      END { if (!done) print k "=" v }' "$DIR/.env" >"$tmp"
+  )
   mv "$tmp" "$DIR/.env"
 }
 

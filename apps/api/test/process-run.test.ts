@@ -68,6 +68,9 @@ const listings: Record<string, Listing[]> = {
 
 const sourceD = "https://board.example.com/d";
 listings[sourceD] = [listing("7"), listing("8"), listing("9")];
+// Listings without details, as search and generic page sources give, and one stating a city.
+const sourceE = "https://board.example.com/e";
+listings[sourceE] = [listing("11"), listing("12"), listing("13"), listing("14", ["Mumbai"])];
 
 const jsonLd = (posting: object) =>
   `<script type="application/ld+json">${JSON.stringify({ "@type": "JobPosting", ...posting })}</script>`;
@@ -81,6 +84,15 @@ const jobHtml: Record<string, string> = {
     jobLocation: bengaluru,
     description: "<p>Build APIs.</p>",
   }),
+  "https://jobs.example.com/11": jsonLd({
+    jobLocation: bengaluru,
+    experienceRequirements: {
+      "@type": "OccupationalExperienceRequirements",
+      monthsOfExperience: 36,
+    },
+    description: "<p>Build search.</p>",
+  }),
+  "https://jobs.example.com/13": jsonLd({ jobLocation: mumbai }),
 };
 
 // "interrupted" also ends the run, as recovery does when another worker gets its job.
@@ -494,6 +506,61 @@ describe("process run", () => {
     const repeat = await runWith(again.id, {});
     expect(repeat.evaluated).toEqual([]);
     expect(repeat.run).toMatchObject({ status: "COMPLETED", checked: 0 });
+  });
+
+  it("reads listings without details before excluding them as unknown", async () => {
+    await prisma.settings.update({
+      where: { userId },
+      data: { includeUnknown: false, targetMinYears: 2, targetMaxYears: 5, experienceYears: 3 },
+    });
+    try {
+      const source = await prisma.jobSource.create({ data: { userId, url: sourceE } });
+      const run = await prisma.run.create({
+        data: { userId, trigger: "MANUAL", contextKey, sourceIds: [source.id] },
+      });
+      const { run: finished, scraped } = await runWith(run.id, {});
+
+      // The Mumbai listing is ruled out by what it states, so its page is never read.
+      expect(scraped).not.toContain(jobUrl("14"));
+      expect(finished).toMatchObject({ status: "COMPLETED", eligible: 3, checked: 3, failed: 0 });
+      const results = await prisma.jobResult.findMany({
+        where: { runId: run.id },
+        orderBy: { jobUrl: "asc" },
+        select: { jobUrl: true, isMatch: true, reason: true, locations: true },
+      });
+      expect(results).toEqual([
+        // Its page states Bengaluru and three years, so it is evaluated.
+        {
+          jobUrl: jobUrl("11"),
+          isMatch: false,
+          reason: "Missing skills",
+          locations: ["Bengaluru"],
+        },
+        {
+          jobUrl: jobUrl("12"),
+          isMatch: false,
+          reason:
+            "The job page's structured data doesn't state its location or experience, and you excluded jobs with unknown details",
+          locations: [],
+        },
+        {
+          jobUrl: jobUrl("13"),
+          isMatch: false,
+          reason: "Doesn't meet your requirements (from the job page's structured data)",
+          locations: ["Mumbai"],
+        },
+      ]);
+    } finally {
+      await prisma.settings.update({
+        where: { userId },
+        data: {
+          includeUnknown: true,
+          targetMinYears: null,
+          targetMaxYears: null,
+          experienceYears: 0,
+        },
+      });
+    }
   });
 
   it("keeps only titles that pass the keyword filters", async () => {

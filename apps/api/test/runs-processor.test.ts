@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
 import type { Job, Queue } from "bullmq";
 import { Effect } from "effect";
 import { PrismaService } from "../src/prisma/prisma.service";
+import { lostJobReason, queueGraceMs } from "../src/runs/recover-run";
 import { RunsProcessor } from "../src/runs/runs.processor";
 import type { RunJob, ScheduledJob } from "../src/runs/runs.queue";
 import { EffectRuntime } from "../src/worker/effect-runtime";
@@ -148,6 +149,28 @@ describe("runs processor", () => {
 
       expect(calls).toEqual([]);
       expect(await prisma.run.count({ where: { userId } })).toBe(1);
+    });
+
+    it("ends a run that never got its job, then queues the tick's run", async () => {
+      const lost = await prisma.run.create({
+        data: {
+          userId,
+          trigger: "MANUAL",
+          contextKey: "test",
+          sourceIds: [],
+          createdAt: new Date(Date.now() - queueGraceMs - 1_000),
+        },
+      });
+      const { queue, calls } = recordingQueue();
+
+      await new RunsProcessor(prisma, noEffects, queue).process(scheduledJobFor(userId));
+
+      expect(await prisma.run.findUniqueOrThrow({ where: { id: lost.id } })).toMatchObject({
+        status: "FAILED",
+        stopReason: lostJobReason,
+      });
+      const run = await prisma.run.findFirstOrThrow({ where: { userId, status: "QUEUED" } });
+      expect(calls).toEqual([["add", "run", { runId: run.id }, { jobId: run.id, attempts: 1 }]]);
     });
 
     it("removes the scheduler on a tick once the schedule is turned off", async () => {
