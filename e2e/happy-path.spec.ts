@@ -1,35 +1,22 @@
 import { expect, test } from "@playwright/test";
+import { completeSetup, matchTitle, signUp } from "./support";
 
-test("sign up, analyse a source and mark the match as applied", async ({ page }) => {
-  await page.goto("/sign-up");
-  await page.getByLabel("Name").fill("E2E User");
-  await page.getByLabel("Email").fill(`e2e-${crypto.randomUUID()}@example.com`);
-  await page.getByLabel("Password").fill("e2e-password-1234");
-  await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL("/home");
+test("sign up, set up through the wizard and mark the first match as applied", async ({ page }) => {
+  await signUp(page);
+  // Resume, the default matching settings, a source, then the first run.
+  await completeSetup(page);
 
-  await page.goto("/settings");
-  await page.getByLabel("Careers page URL").fill("https://board.example.com/jobs");
-  await page.getByRole("button", { name: "Add source" }).click();
-  await expect(page.getByText("https://board.example.com/jobs")).toBeVisible();
-
-  await page.getByLabel("Resume URL").fill("https://example.com/cv.pdf");
-  await page.getByRole("button", { name: "Save resume" }).click();
-  await expect(page.getByText("Resume saved")).toBeVisible();
-
-  // With no experience set, only the listing without an experience range passes the filters.
-  await page.goto("/analyze");
-  await page.getByRole("button", { name: "Analyze" }).click();
-  await expect(page.getByText("Completed")).toBeVisible();
-  await expect(page.getByText("Full Stack Developer")).toBeVisible();
+  await expect(page.getByText("Completed", { exact: true })).toBeVisible();
+  await expect(page.getByText(matchTitle)).toBeVisible();
   await expect(page.getByText("Match", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "See your matches" }).click();
 
-  await page.goto("/matches");
-  await expect(page.getByText("Full Stack Developer")).toBeVisible();
+  await expect(page).toHaveURL("/matches");
+  await expect(page.getByText(matchTitle)).toBeVisible();
   await page.getByRole("button", { name: "Mark applied" }).click();
   await expect(page.getByText("No pending matches.", { exact: false })).toBeVisible();
 
   await page.getByRole("button", { name: "Applied" }).click();
-  await expect(page.getByText("Full Stack Developer")).toBeVisible();
+  await expect(page.getByText(matchTitle)).toBeVisible();
   await expect(page.getByRole("button", { name: "Move to pending" })).toBeVisible();
 });
