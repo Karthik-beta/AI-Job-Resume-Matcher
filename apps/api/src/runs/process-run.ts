@@ -33,6 +33,7 @@ import { listingKind } from "../matching/sources/search";
 import { acceptsTitle } from "../matching/title-filters";
 import { type TitleTriage, triageListings } from "../matching/triage";
 import { failActiveRun } from "./recover-run";
+import { runPageUrl } from "./run-page-url";
 import { requirementsOf, titleFiltersOf } from "./run-settings";
 import { type MatchFields, upsertMatch } from "./save-match";
 
@@ -404,6 +405,7 @@ const runWith = (prisma: PrismaClient, runId: string, model: string, credits: Ru
             company: job.company,
             jobUrl: job.url,
             reason: result.reason ?? "",
+            runUrl: runPageUrl(runId),
           })
           .pipe(Effect.catchTag("NotifyFailed", (error) => Effect.logWarning(error.message)));
       }

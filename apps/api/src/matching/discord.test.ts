@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { type Duration, Effect, Fiber } from "effect";
 import { TestClock } from "effect/testing";
-import { makeDiscordNotifier } from "./discord";
+import { makeDiscordNotifier, matchPayload } from "./discord";
 
 const alert = {
   title: "Backend Engineer",
   company: "Example",
   jobUrl: "https://jobs.example.com/1",
   reason: "Strong fit",
+  runUrl: "https://app.example.com/runs/run-1",
 };
 const webhook = "https://discord.com/api/webhooks/1/token";
 
@@ -57,7 +58,8 @@ describe("Discord notifier", () => {
             {
               title: "New job match",
               url: alert.jobUrl,
-              description: "**Backend Engineer** at **Example**\n\nStrong fit",
+              description:
+                "**Backend Engineer** at **Example**\n\nStrong fit\n\n[Open the run in Job Matcher](https://app.example.com/runs/run-1)",
               color: 0x5865f2,
             },
           ],
@@ -65,6 +67,14 @@ describe("Discord notifier", () => {
         },
       },
     ]);
+  });
+
+  test("keeps the run link when a long reason is cut", () => {
+    const [embed] = matchPayload({ ...alert, reason: "x".repeat(5_000) }).embeds;
+    expect(embed?.description.length).toBeLessThanOrEqual(4_000);
+    expect(embed?.description).toEndWith(
+      "\n\n[Open the run in Job Matcher](https://app.example.com/runs/run-1)",
+    );
   });
 
   test("fails with NotifyFailed on an error status", async () => {

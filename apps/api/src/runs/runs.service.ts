@@ -11,6 +11,7 @@ import { config } from "../config";
 import { PrismaService } from "../prisma/prisma.service";
 import { createRun } from "./create-run";
 import { MatchAlerts } from "./match-alerts";
+import { runPageUrl } from "./run-page-url";
 import { type RunJob, runsQueue, type ScheduledJob } from "./runs.queue";
 import { upsertMatch } from "./save-match";
 import { enqueueRun } from "./schedule";
@@ -85,6 +86,7 @@ export class RunsService {
           company: result.company,
           jobUrl: result.jobUrl,
           reason: result.reason ?? "",
+          runUrl: runPageUrl(runId),
         });
       }
     }

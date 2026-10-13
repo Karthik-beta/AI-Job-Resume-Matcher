@@ -30,6 +30,7 @@ import { PrismaService } from "../src/prisma/prisma.service";
 import { fakeHttpFetch, fakePdfParser } from "../src/providers/fake";
 import { processRun } from "../src/runs/process-run";
 import { interruptedReason } from "../src/runs/recover-run";
+import { runPageUrl } from "../src/runs/run-page-url";
 
 const listing = (url: string, locations: string[] = [], title = `Job ${url}`): Listing => ({
   title,
@@ -146,13 +147,13 @@ describe("process run", () => {
     const evaluated: string[] = [];
     const resumeHashes = new Set<string | undefined>();
     const scraped: string[] = [];
-    const alerts: { webhookUrl: string; jobUrl: string }[] = [];
+    const alerts: { webhookUrl: string; jobUrl: string; runUrl: string }[] = [];
     const notifier = Notifier.of({
       notifyMatch: (webhookUrl, alert) =>
         options.failAlerts
           ? Effect.fail(new NotifyFailed({ message: "Discord returned 500." }))
           : Effect.sync(() => {
-              alerts.push({ webhookUrl, jobUrl: alert.jobUrl });
+              alerts.push({ webhookUrl, jobUrl: alert.jobUrl, runUrl: alert.runUrl });
             }),
     });
     const firecrawl = Firecrawl.of({
@@ -386,10 +387,11 @@ describe("process run", () => {
       await prisma.jobResult.deleteMany({ where: { userId } });
       const verdicts = { [jobUrl("1")]: "match", [jobUrl("4")]: "match" } as const;
 
-      const { alerts } = await runWith(await startRun(), { verdicts });
+      const { run, alerts } = await runWith(await startRun(), { verdicts });
+      const runUrl = runPageUrl(run.id);
       expect(alerts).toEqual([
-        { webhookUrl, jobUrl: jobUrl("1") },
-        { webhookUrl, jobUrl: jobUrl("4") },
+        { webhookUrl, jobUrl: jobUrl("1"), runUrl },
+        { webhookUrl, jobUrl: jobUrl("4"), runUrl },
       ]);
 
       await prisma.jobResult.deleteMany({ where: { userId } });

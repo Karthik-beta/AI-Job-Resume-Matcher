@@ -169,6 +169,7 @@ describe("fake providers", () => {
       company: "Example",
       jobUrl: "https://jobs.example.com/1",
       reason: "Fit",
+      runUrl: "https://app.example.com/runs/run-1",
     };
     const sent = await Effect.runPromise(
       fakeNotifier

@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { type SubmitEvent, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { type SubmitEvent, Suspense, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth-client";
+import { AFTER_SIGN_IN, AFTER_SIGN_UP, authHref, safeNext } from "@/lib/safe-next";
 
 type Mode = "sign-in" | "sign-up";
 
@@ -77,7 +78,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
         setError(errorMessage(result.error));
         return;
       }
-      router.push("/");
+      // Read at submit time, so the form needs no Suspense boundary. `replace` keeps the auth
+      // page out of history, so Back doesn't return to the form.
+      const next = safeNext(new URLSearchParams(window.location.search).get("next"));
+      router.replace(next ?? (mode === "sign-up" ? AFTER_SIGN_UP : AFTER_SIGN_IN));
       router.refresh();
     } catch {
       setError(unreachable);
@@ -120,13 +124,28 @@ export function AuthForm({ mode }: { mode: Mode }) {
       </form>
       <p className="text-sm text-muted-foreground">
         {text.switchText}{" "}
-        <Link
-          href={text.switchHref}
-          className="font-medium text-foreground underline underline-offset-4"
-        >
-          {text.switchLabel}
-        </Link>
+        {/* `useSearchParams` sits inside Suspense so the page can still prerender. */}
+        <Suspense fallback={<SwitchLink mode={mode} next={null} />}>
+          <CurrentSwitchLink mode={mode} />
+        </Suspense>
       </p>
     </div>
+  );
+}
+
+function CurrentSwitchLink({ mode }: { mode: Mode }) {
+  return <SwitchLink mode={mode} next={useSearchParams().get("next")} />;
+}
+
+// The link to the other auth page, carrying the `next` page across.
+function SwitchLink({ mode, next }: { mode: Mode; next: string | null }) {
+  const text = copy[mode];
+  return (
+    <Link
+      href={authHref(text.switchHref, next)}
+      className="font-medium text-foreground underline underline-offset-4"
+    >
+      {text.switchLabel}
+    </Link>
   );
 }

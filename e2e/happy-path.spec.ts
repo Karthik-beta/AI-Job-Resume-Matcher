@@ -6,7 +6,7 @@ test("sign up, analyse a source and mark the match as applied", async ({ page })
   await page.getByLabel("Email").fill(`e2e-${crypto.randomUUID()}@example.com`);
   await page.getByLabel("Password").fill("e2e-password-1234");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page).toHaveURL("/");
+  await expect(page).toHaveURL("/home");
 
   await page.goto("/settings");
   await page.getByLabel("Careers page URL").fill("https://board.example.com/jobs");

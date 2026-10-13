@@ -4,7 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { LogOut, MenuIcon, Settings, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, type ReactNode, Suspense, use, useEffect, useState } from "react";
+import { createContext, type ReactNode, Suspense, use, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { authClient } from "@/lib/auth-client";
+import { authHref } from "@/lib/safe-next";
 
 type NavItem = { href: string; label: string; sections: string[] };
 
@@ -37,10 +38,9 @@ function isCurrent(item: NavItem, pathname: string | null) {
   );
 }
 
-// Where the guard sends signed-out visitors. Read at redirect time, so a `next` parameter can be
-// added here (e.g. from `window.location`) without touching the guard.
+// Where the guard sends signed-out visitors: the sign-in page, returning here afterwards.
 function signInUrl() {
-  return "/sign-in";
+  return authHref("/sign-in", `${window.location.pathname}${window.location.search}`);
 }
 
 const SignedInContext = createContext(false);
@@ -56,10 +56,22 @@ export function AppShell({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { data: session, isPending } = authClient.useSession();
   const [signingOut, setSigningOut] = useState(false);
+  const redirecting = useRef(false);
 
   useEffect(() => {
     // Signing out empties the session too; that navigates to `/` instead of the sign-in page.
-    if (!isPending && !session && !signingOut) router.replace(signInUrl());
+    if (isPending || session || signingOut || redirecting.current) return;
+    redirecting.current = true;
+    // The proxy only checks that a session cookie exists. An expired or revoked one is cleared
+    // first, or the proxy would send the sign-in page straight back here, and round again.
+    // If that fails the cookie stays, so the page waits on its skeleton rather than loop.
+    void authClient.signOut().then(
+      ({ error }) => {
+        if (error) toast.error("Couldn't reach the server. Reload the page to try again.");
+        else router.replace(signInUrl());
+      },
+      () => toast.error("Couldn't reach the server. Reload the page to try again."),
+    );
   }, [isPending, session, signingOut, router]);
 
   async function signOut() {

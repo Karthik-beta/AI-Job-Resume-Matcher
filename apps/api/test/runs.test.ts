@@ -6,6 +6,7 @@ import type { Queue } from "bullmq";
 import request from "supertest";
 import { PrismaService } from "../src/prisma/prisma.service";
 import { MatchAlerts } from "../src/runs/match-alerts";
+import { runPageUrl } from "../src/runs/run-page-url";
 import type { RunJob } from "../src/runs/runs.queue";
 import { signUp, startApp } from "./helpers";
 
@@ -275,6 +276,7 @@ describe("run status", () => {
         company: "Example",
         jobUrl: "https://jobs.example.com/retry-alert",
         reason: "Strong fit",
+        runUrl: runPageUrl(run.id),
       });
     } finally {
       send.mockRestore();
@@ -286,7 +288,13 @@ describe("run status", () => {
   });
 
   it("only logs an alert that fails", async () => {
-    const alert = { title: "Engineer", company: "Example", jobUrl: "https://x.test", reason: "" };
+    const alert = {
+      title: "Engineer",
+      company: "Example",
+      jobUrl: "https://x.test",
+      reason: "",
+      runUrl: "https://app.example.com/runs/run-1",
+    };
     await expect(
       app.get(MatchAlerts).send("https://example.com/not-discord", alert),
     ).resolves.toBeUndefined();
