@@ -7,6 +7,10 @@
 </p>
 
 <p align="center">
+  <a href="https://karthik-beta.github.io/AI-Job-Resume-Matcher/">Website</a>
+</p>
+
+<p align="center">
   <a href="https://dl.circleci.com/status-badge/redirect/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master"><img src="https://dl.circleci.com/status-badge/img/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master.svg?style=shield" alt="CircleCI"></a>
   <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/releases/latest"><img src="https://img.shields.io/github/v/release/Karthik-beta/AI-Job-Resume-Matcher?sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
