@@ -1,5 +1,5 @@
-# Publishes site/ (the marketing page) to GitHub Pages. CI stays on CircleCI; this workflow only
-# deploys, because Pages takes its artifact from GitHub Actions.
+# Publishes site/ (the marketing page) to GitHub Pages. The checks run in ci.yml; this workflow
+# only deploys.
 name: Pages
 
 on:

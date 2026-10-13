@@ -12,7 +12,7 @@ See [Development](README.md#development) in the README to get a local setup runn
 
 ## Pull requests
 
-`master` is protected, for admins too: a commit needs a passing CircleCI `check` status before it can land, and force pushes and deletion are blocked.
+`master` is protected, for admins too: a commit needs a passing `check` job from the GitHub Actions `CI` workflow before it can land, and force pushes and deletion are blocked.
 
 A PR stacked on another feature branch must be retargeted before its base branch goes away. GitHub closes a PR whose base branch is deleted, and it can't be reopened. To merge a stack:
 
@@ -37,17 +37,10 @@ Releases follow semantic versioning. To cut one from `master`:
 gh release create v1.2.0 --generate-notes
 ```
 
-The `vX.Y.Z` tag runs the CircleCI checks again. Once they pass:
-- `publish-amd64` and `publish-arm64` build the images natively and push them to `ghcr.io/karthik-beta/job-matcher-api` and `ghcr.io/karthik-beta/job-matcher-web`.
+The `vX.Y.Z` tag runs the `CI` checks again. Once they pass:
+- `publish` builds the images natively on an amd64 and an arm64 runner and pushes them to `ghcr.io/karthik-beta/job-matcher-api` and `ghcr.io/karthik-beta/job-matcher-web`.
 - `publish-manifest` joins them into the multi-arch `1.2.0` and `latest` tags.
 
 The installers pick up the newest GitHub release, so the next install or upgrade uses it.
 
-The publish jobs read `GHCR_USER` and `GHCR_TOKEN` from the CircleCI context `ghcr`. GitHub Packages only accepts personal access tokens (classic), not fine-grained ones, so the token is kept as narrow as a classic token allows:
-
-- **Scope:** `write:packages` only. Create it from [this link](https://github.com/settings/tokens/new?scopes=write:packages&description=CircleCI%20GHCR%20publish), which leaves out the `repo` scope the form otherwise adds alongside it. Use an expiry date, at most 90 days.
-- **Context restrictions** (Organization Settings → Contexts → `ghcr`):
-  - a project restriction to this repository
-  - the expression restriction `pipeline.git.tag starts-with "v" and not job.ssh.enabled`, so only release tags can read the token, and never from a job rerun with SSH
-
-To rotate the token, create a new one the same way, replace `GHCR_TOKEN` in the context, and delete the old token on GitHub.
+The publish jobs push with the workflow's own `GITHUB_TOKEN` (`packages: write`, granted to those jobs only), so there is no personal access token to create or rotate. Each package must give this repository write access: on the package page, Package settings → Manage Actions access.

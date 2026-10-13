@@ -8,4 +8,4 @@ The Docker Compose stack for self-hosting:
 
 See [docs/self-hosting.md](../docs/self-hosting.md) for installing, upgrading, HTTPS, backups and troubleshooting.
 
-CI builds both images from source, starts this stack with `PROVIDERS=fake`, and runs `install.sh` against it on every push (the `docker` job in `.circleci/config.yml`). A broken image or installer fails the pull request rather than someone's install.
+CI builds both images from source, starts this stack with `PROVIDERS=fake`, and runs `install.sh` against it on every push (the `docker` job in `.github/workflows/ci.yml`). A broken image or installer fails the pull request rather than someone's install.

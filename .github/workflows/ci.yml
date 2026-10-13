@@ -1,0 +1,185 @@
+name: CI
+
+# Release tags (vX.Y.Z) also run the checks, and publish the images once they pass.
+on:
+  push:
+    branches: [master]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its older run. Runs on master and tags always finish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: job_matcher
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d job_matcher"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:8
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s --health-timeout 5s --health-retries 30
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/job_matcher
+      BETTER_AUTH_SECRET: ci-only-secret-not-used-in-production
+      BETTER_AUTH_URL: http://localhost:3000
+      API_PORT: 4000
+      REDIS_URL: redis://localhost:6379
+      OPENROUTER_MODEL: nvidia/nemotron-3-super-120b-a12b:free
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26.11"
+      # The repo allows only GitHub-owned actions, so Bun comes from its own installer.
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+      - run: bun install --frozen-lockfile
+      - run: bun x --bun prisma migrate deploy
+      - name: Install Chromium
+        run: bun x playwright install --with-deps chromium
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run test:e2e
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+
+  # Builds both Dockerfile targets and starts deploy/compose.yml on fixtures, to catch
+  # breakage that only shows up in the images. Then runs install.sh against those images.
+  docker:
+    runs-on: ubuntu-24.04
+    env:
+      COMPOSE_FILE: deploy/compose.yml:deploy/compose.build.yml
+      WEB_PORT: 8080
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint install.sh
+        run: shellcheck install.sh
+      - name: Write deploy/.env
+        run: |
+          cat > deploy/.env <<EOF
+          POSTGRES_PASSWORD=$(openssl rand -hex 32)
+          BETTER_AUTH_SECRET=$(openssl rand -hex 32)
+          BETTER_AUTH_URL=http://localhost:8080
+          API_PORT=4000
+          OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+          PROVIDERS=fake
+          EOF
+      - run: docker compose build
+      - name: Start the stack
+        run: docker compose up -d --no-build --wait --wait-timeout 120
+      - name: Check the API through the web proxy
+        run: curl -fsS --retry 10 --retry-delay 2 --retry-all-errors http://localhost:8080/api/health
+      - name: Compose status and logs
+        if: ${{ !cancelled() }}
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color
+      - name: Install with install.sh on the images just built
+        env:
+          # The installer downloads the compose files from GitHub at this commit. On a pull request
+          # that is the branch head, since GITHUB_SHA there is a merge commit.
+          JOB_MATCHER_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          # The installer uses the same project name, so drop this stack's volumes first.
+          docker compose down -v
+          for target in api web; do
+            docker tag "ghcr.io/karthik-beta/job-matcher-$target:latest" "ghcr.io/karthik-beta/job-matcher-$target:ci"
+          done
+          export JOB_MATCHER_NONINTERACTIVE=1 JOB_MATCHER_VERSION=ci
+          export JOB_MATCHER_DIR="$HOME/job-matcher"
+          # Under umask 022 a new file is readable by everyone; .env must still end up 600.
+          umask 022
+          sh install.sh
+          test "$(stat -c %a "$JOB_MATCHER_DIR/.env")" = 600
+          grep -q '^PROVIDERS=fake$' "$JOB_MATCHER_DIR/.env"
+          curl -fsS --retry 10 --retry-delay 2 --retry-all-errors \
+            "$(sed -n 's/^BETTER_AUTH_URL=//p' "$JOB_MATCHER_DIR/.env")/api/health"
+          # A second run is an upgrade: it keeps the generated settings, and tightens a .env that
+          # an earlier install left readable by everyone.
+          cp "$JOB_MATCHER_DIR/.env" /tmp/env.before
+          chmod 644 "$JOB_MATCHER_DIR/.env"
+          sh install.sh
+          diff /tmp/env.before "$JOB_MATCHER_DIR/.env"
+          test "$(stat -c %a "$JOB_MATCHER_DIR/.env")" = 600
+
+  # Builds each architecture natively and pushes it as <version>-<arch>. Runs on release tags only.
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, docker]
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # The job's own token pushes to GHCR, so there is no personal access token to keep.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Build and push ${{ matrix.arch }} images
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for target in api web; do
+            image="ghcr.io/karthik-beta/job-matcher-$target"
+            docker build --target "$target" \
+              --label "org.opencontainers.image.version=$version" \
+              --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+              --tag "$image:$version-$ARCH" .
+            docker push "$image:$version-$ARCH"
+          done
+
+  # Joins the per-architecture images into multi-arch <version> and latest tags.
+  publish-manifest:
+    needs: [publish]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Push multi-arch tags
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for target in api web; do
+            image="ghcr.io/karthik-beta/job-matcher-$target"
+            docker buildx imagetools create --tag "$image:$version" --tag "$image:latest" \
+              "$image:$version-amd64" "$image:$version-arm64"
+          done

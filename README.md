@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://dl.circleci.com/status-badge/redirect/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master"><img src="https://dl.circleci.com/status-badge/img/gh/Karthik-beta/AI-Job-Resume-Matcher/tree/master.svg?style=shield" alt="CircleCI"></a>
+  <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/actions/workflows/ci.yml?query=branch%3Amaster"><img src="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
   <a href="https://github.com/Karthik-beta/AI-Job-Resume-Matcher/releases/latest"><img src="https://img.shields.io/github/v/release/Karthik-beta/AI-Job-Resume-Matcher?sort=semver" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/TypeScript-strict-3178c6" alt="TypeScript">
@@ -136,7 +136,7 @@ flowchart LR
 | Backend | NestJS, Effect, better-auth |
 | Data | PostgreSQL 17 with Prisma, Redis 8 with BullMQ |
 | AI and scraping | OpenRouter (structured JSON output), Firecrawl (cloud or self-hosted) |
-| Quality | Biome, Bun test, Playwright, CircleCI |
+| Quality | Biome, Bun test, Playwright, GitHub Actions |
 | Delivery | Docker multi-stage builds, Docker Compose, GHCR multi-arch images |
 
 ## Development
