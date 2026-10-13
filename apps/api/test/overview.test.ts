@@ -128,11 +128,15 @@ describe("overview", () => {
 
   it("reports the next tick of the user's schedule", async () => {
     const queue = app.get<Queue>(getQueueToken("runs"));
-    // No resume, so a tick a running worker picks up starts no run.
-    await alice
-      .put("/api/settings")
-      .send({ ...defaultSettings, scheduleMinutes: 15 })
-      .expect(200);
+    // Alice has a source; with a resume too, ticks would start runs. An active run makes a tick
+    // a running dev worker picks up start nothing.
+    const active = await addRun(aliceId, "RUNNING", new Date());
+    const scheduled = {
+      ...defaultSettings,
+      resumeUrl: "https://example.com/cv.pdf",
+      scheduleMinutes: 15,
+    };
+    await alice.put("/api/settings").send(scheduled).expect(200);
     const nextTick = async () => {
       const scheduler = await queue.getJobScheduler(`user:${aliceId}`);
       expect(scheduler?.next).toBeNumber();
@@ -145,7 +149,15 @@ describe("overview", () => {
     expect([before, await nextTick()]).toContain(overview.body.nextScheduledRunAt);
     expect((await bob.get("/api/overview").expect(200)).body.nextScheduledRunAt).toBeNull();
 
+    // Without a resume a tick starts no run, so no next check is promised.
+    await alice
+      .put("/api/settings")
+      .send({ ...scheduled, resumeUrl: null })
+      .expect(200);
+    expect((await alice.get("/api/overview").expect(200)).body.nextScheduledRunAt).toBeNull();
+
     await alice.put("/api/settings").send(defaultSettings).expect(200);
     expect((await alice.get("/api/overview").expect(200)).body.nextScheduledRunAt).toBeNull();
+    await prisma.run.delete({ where: { id: active.id } });
   });
 });

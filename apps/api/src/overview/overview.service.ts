@@ -48,15 +48,21 @@ export class OverviewService {
       }),
       this.prisma.run.findFirst({
         where: { userId, status: { in: ["QUEUED", "RUNNING"] } },
+        // Normally at most one; if a tick ever races a manual start, report the newest.
+        orderBy: { createdAt: "desc" },
         select: { id: true, status: true },
       }),
       this.prisma.match.count({ where: { userId, status: "PENDING" } }),
     ]);
     const scheduleMinutes = settings?.scheduleMinutes ?? null;
+    const hasResume = Boolean(settings?.resumeUrl);
+    // A tick starts no run until there is a resume and a source (see createScheduledRun), so
+    // there is no next check to promise before then.
+    const schedulesRuns = scheduleMinutes !== null && hasResume && sourceCount > 0;
 
     return {
       setup: {
-        hasResume: Boolean(settings?.resumeUrl),
+        hasResume,
         sourceCount,
         hasPreferences: settings !== null,
         hasRun: latestRun !== null,
@@ -73,11 +79,10 @@ export class OverviewService {
         status: activeRun.status === "RUNNING" ? "RUNNING" : "QUEUED",
       },
       pendingMatches,
-      nextScheduledRunAt:
-        scheduleMinutes === null
-          ? null
-          : ((await this.nextScheduledRun(userId, scheduleMinutes * 60_000, now))?.toISOString() ??
-            null),
+      nextScheduledRunAt: schedulesRuns
+        ? ((await this.nextScheduledRun(userId, scheduleMinutes * 60_000, now))?.toISOString() ??
+          null)
+        : null,
     };
   }
 
