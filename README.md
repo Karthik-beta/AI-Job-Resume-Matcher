@@ -178,6 +178,7 @@ deploy/          Docker Compose stack for self-hosting
 - [Self-hosting](docs/self-hosting.md): install, upgrade, live mode, HTTPS, backups, troubleshooting
 - [Configuration](docs/configuration.md): scraping modes, job sources, filters, Firecrawl credits, OpenRouter routing
 - [Contributing](CONTRIBUTING.md): git hooks, pull requests and releases
+- [Brand](docs/brand/README.md): the logo, colours and type, and where each icon lives
 
 ## License
 
