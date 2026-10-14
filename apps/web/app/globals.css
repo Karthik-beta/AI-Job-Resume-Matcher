@@ -57,6 +57,8 @@
   --match: #2f6b4f;
   --match-soft: #dcebdf;
   --highlight: #f3de6e;
+  /* The highlighter passing twice: only where the logo's two strokes cross. */
+  --highlight-deep: #e2b92a;
   --radius: 0.375rem;
 }
 
