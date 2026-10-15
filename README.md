@@ -57,7 +57,7 @@ Sign up, add a careers page and a link to your resume in **Settings**, then pres
 
 | Mode | Keys | What you get |
 | --- | --- | --- |
-| **Demo** (press Enter at the key prompts) | none | The whole app on built-in sample pages. Free, and a good first look. |
+| **Demo** (press Enter at the key prompts) | none | The whole app on built-in sample pages. Free, and a good first look. ATS boards (Greenhouse, Lever and so on) have no sample data, so use a careers page source. |
 | **Live** | [OpenRouter](https://openrouter.ai/keys) for AI matching, [Firecrawl](https://www.firecrawl.dev/app/api-keys) for scraping (free plan: 1,000 pages a month) | Real job boards and real matches. AI cost is a fraction of a cent per job. |
 
 To switch from demo to live later, put both keys in `~/job-matcher/.env`, set `PROVIDERS=live`, and run `docker compose up -d` in that folder. To upgrade, run the installer again.
@@ -79,7 +79,7 @@ Prefer not to pipe a script into your shell? The [self-hosting guide](docs/self-
 
 - **Typed failure handling.** The matching pipeline is written with [Effect](https://effect.website). Every failure is a tagged error in the type signature ([`errors.ts`](apps/api/src/matching/errors.ts)), so the run decides on purpose what each one does:
   - a rejected API key stops the run
-  - a blocked page fails only that job
+  - a blocked job page fails only that job, while a resume or careers page that can't be read stops the run
   - a Discord outage is only logged
 - **Safe, idempotent runs.** The API only queues a run; a BullMQ worker does the slow work.
   - The run id doubles as the queue job id, so a double click can't queue a run twice ([`schedule.ts`](apps/api/src/runs/schedule.ts)).
@@ -124,7 +124,7 @@ flowchart LR
 
 - **A queue, not the request.** A run scrapes several pages and makes one LLM call per job, which can take minutes on the free Firecrawl plan's 10 requests a minute. The API answers immediately with a queued run, and the page polls for progress.
 - **Effect only where the failures are.** Scraping, rate limiting, retries, evaluation and notifications use Effect; Nest controllers and services stay plain async code. The two meet at one `ManagedRuntime`, built when the worker boots.
-- **The cache lives in Postgres.** Scraped resumes, job pages and source listings are stored per user in a `PageCache` table. Listings are kept for 15 minutes (a day for search sources), and everything else until the user clears it. The cache survives restarts, needs no extra service, and can be cleared from Settings.
+- **The cache lives in Postgres.** Scraped resumes, job pages and source listings are stored per user in a `PageCache` table. Listings are kept for 15 minutes (a day for search sources) and resumes read from a web page for a day. A PDF resume is rechecked with a conditional GET on every run, and job pages are kept until the user clears them. The cache survives restarts, needs no extra service, and can be cleared from Settings.
 - **A single worker.** Concurrency is 1, so every run shares one Firecrawl rate limiter, and jobs are checked one at a time and never interleave. That's enough for a personal tool. More throughput would first need a shared, Redis-backed limiter.
 
 ## Tech stack
@@ -146,13 +146,14 @@ You need [Bun](https://bun.sh) and Docker.
 ```bash
 cp .env.example .env    # then set BETTER_AUTH_SECRET, e.g. to the output of: openssl rand -base64 32
 bun install
+docker compose up -d --wait   # Postgres must be up before the migration
 bun run db:migrate
 bun run dev
 ```
 
 `bun run dev` starts Postgres and Redis in Docker, then the web app at http://localhost:3000 and the API and worker with hot reload (health check: http://localhost:4000/api/health).
 
-Set `PROVIDERS=fake` in `.env` to run the worker on fixtures with no API keys. With `PROVIDERS=live`, the worker needs `OPENROUTER_API_KEY` and a Firecrawl (see [configuration](docs/configuration.md)). The API refuses to start if a required variable is missing. When `.env.example` gains a new variable, copy it into your `.env`.
+Set `PROVIDERS=fake` in `.env` to run the worker on fixtures with no API keys. The fixtures cover careers pages and search sources, not ATS boards, whose direct API requests fail in that mode. With `PROVIDERS=live`, the worker needs `OPENROUTER_API_KEY` and a Firecrawl (see [configuration](docs/configuration.md)). The API refuses to start if a required variable is missing. When `.env.example` gains a new variable, copy it into your `.env`.
 
 | Script | Description |
 | --- | --- |
