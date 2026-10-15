@@ -27,12 +27,13 @@ Where the copies live:
 
 - `apps/web/app/`: `icon.svg`, `favicon.ico` (16, 32 and 48 px), `apple-icon.png` (180 px) and `manifest.ts`.
 - `apps/web/public/`: the install icons, `icon-192.png`, `icon-512.png` and `icon-maskable-512.png`.
+- `docs/logo.svg`: the mark at the top of the repository README.
 - `site/assets/`: `logo.svg`, `favicon.ico`, `apple-touch-icon.png` and `social-preview.png`.
 - `apps/web/components/logo.tsx` and the header of `site/index.html` draw the mark inline.
 
 ## The mark
 
-It is drawn on a 64-unit grid. The base of the check sits at y = 48, the long stroke's top at y = 16 and the short stroke's top at y = 30, so at 16 and 32 px the horizontal edges land on whole pixels. The tile's corner radius is 14 units.
+It is drawn on a 64-unit grid. The base of the check sits at y = 48, the long stroke's top at y = 16 and the short stroke's top at y = 30, so at 32 px every horizontal edge lands on a whole pixel. At 16 px the base and the long stroke's top do too, and the short stroke's top falls on a half pixel (7.5). The tile's corner radius is 14 units.
 
 The maskable icon scales the check to 80% so it stays inside the 40% safe circle that launchers crop to.
 
@@ -51,7 +52,7 @@ These are the app's own tokens in `apps/web/app/globals.css`.
 
 ## Type
 
-Schibsted Grotesk, one family throughout: bold for headings and the wordmark, regular for reading. The wordmark is set in bold with −1.5% tracking and outlined in the SVGs, so it renders without the font installed.
+Schibsted Grotesk, one family throughout: extrabold for page titles, bold for the wordmark, regular for reading. In the app the wordmark is set in bold with `tracking-tight` (−2.5%); in the SVG lockups it is outlined, so it renders without the font installed.
 
 ## Using the logo
 

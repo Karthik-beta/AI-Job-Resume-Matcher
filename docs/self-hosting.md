@@ -31,6 +31,7 @@ It never asks for admin rights and writes only to the install folder. You can [r
 | --- | --- | --- |
 | `JOB_MATCHER_DIR` | `~/job-matcher` | Where the stack and its `.env` live |
 | `JOB_MATCHER_VERSION` | the latest release | The release to install, e.g. `1.2.0` |
+| `JOB_MATCHER_REF` | the release tag (`master` for a non-release version) | The git ref to download `compose.yml` and `.env.example` from |
 | `JOB_MATCHER_NONINTERACTIVE` | unset | `1` skips the prompts and reads `OPENROUTER_API_KEY` and `FIRECRAWL_API_KEY` from the environment |
 
 ### By hand
@@ -65,7 +66,7 @@ docker compose -f deploy/compose.yml -f deploy/compose.build.yml up -d --build -
 
 `PROVIDERS` in `.env` picks the mode:
 
-- **`fake` (demo):** swaps the scraper, the LLM and Discord for built-in sample pages. Every feature works, with no keys and no cost.
+- **`fake` (demo):** swaps the scraper, the LLM and Discord for built-in sample pages. Every feature works, with no keys and no cost, except ATS board sources (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee): they are read over their public APIs, which demo mode has no sample data for, so a run with one stops.
 - **`live`:** scrapes real job boards. It needs two keys:
   - `OPENROUTER_API_KEY` from [openrouter.ai/keys](https://openrouter.ai/keys). It pays for the AI matching; by default each job costs a fraction of a cent.
   - `FIRECRAWL_API_KEY` from [firecrawl.dev](https://www.firecrawl.dev/app/api-keys). The free plan scrapes 1,000 pages a month. Greenhouse, Lever, Ashby, SmartRecruiters and Recruitee boards are read through their public APIs and use no credits.
